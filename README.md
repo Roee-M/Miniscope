@@ -21,10 +21,3 @@
 | Component               | Description                                  |
 |------------------------|----------------------------------------------|
 | MCU                    | ESP32-S3-WROOM-1-N16R8 (16MB Flash, 8MB PSRAM) |
-| ADC                    |    |
-| Analog Frontend        | Custom-designed: buffering, scaling, filtering |
-| Power                  | USB-C powered (5V input, onboard regulators) |
-| Display                | Android app (USB-C connected)                |
-| PCB                    | Custom 2-layer design                        |
-
----
