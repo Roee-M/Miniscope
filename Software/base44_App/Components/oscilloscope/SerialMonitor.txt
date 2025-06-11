@@ -1,0 +1,407 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Terminal, Send, Trash2, Copy, Download } from 'lucide-react';
+import { Alert, AlertDescription } from "@/components/ui/alert";
+
+/**
+ * SerialMonitor Component
+ * 
+ * Displays incoming raw data from the USB device and allows sending commands
+ * Helps debug communication issues and verify data flow
+ * 
+ * Props:
+ * - device: Connected USB device object
+ * - deviceEndpoints: Object containing interface and endpoint numbers
+ * - isConnected: Boolean indicating connection status
+ */
+export default function SerialMonitor({ device, deviceEndpoints, isConnected }) {
+  // State for storing received data messages
+  const [serialMessages, setSerialMessages] = useState([]);
+  
+  // State for the command input field
+  const [commandToSend, setCommandToSend] = useState('');
+  
+  // State to control if monitoring is active
+  const [isMonitoring, setIsMonitoring] = useState(false);
+  
+  // State for any serial communication errors
+  const [serialError, setSerialError] = useState(null);
+  
+  // State for connection statistics
+  const [stats, setStats] = useState({
+    totalBytes: 0,
+    totalMessages: 0,
+    messagesPerSecond: 0
+  });
+
+  // Refs for managing the monitoring loop and statistics
+  const monitoringLoopRef = useRef(null);
+  const keepMonitoringRef = useRef(false);
+  const lastStatsUpdateRef = useRef(Date.now());
+  const messageCountSinceLastUpdateRef = useRef(0);
+  const scrollAreaRef = useRef(null);
+
+  // Buffer size for reading data from USB device
+  const SERIAL_BUFFER_SIZE = 64;
+
+  /**
+   * Formats bytes as hex string for display
+   * Example: [65, 66, 67] becomes "41 42 43"
+   */
+  const formatBytesAsHex = useCallback((uint8Array) => {
+    return Array.from(uint8Array)
+      .map(byte => byte.toString(16).padStart(2, '0').toUpperCase())
+      .join(' ');
+  }, []);
+
+  /**
+   * Formats bytes as ASCII string, replacing non-printable characters with dots
+   * Example: [65, 66, 67, 10] becomes "ABC."
+   */
+  const formatBytesAsAscii = useCallback((uint8Array) => {
+    return Array.from(uint8Array)
+      .map(byte => (byte >= 32 && byte <= 126) ? String.fromCharCode(byte) : '.')
+      .join('');
+  }, []);
+
+  /**
+   * Updates statistics for data throughput monitoring
+   */
+  const updateStatistics = useCallback((newMessageCount, newByteCount) => {
+    const now = Date.now();
+    const timeSinceLastUpdate = now - lastStatsUpdateRef.current;
+    
+    // Update stats every second
+    if (timeSinceLastUpdate >= 1000) {
+      const messagesPerSecond = (messageCountSinceLastUpdateRef.current * 1000) / timeSinceLastUpdate;
+      
+      setStats(prevStats => ({
+        totalBytes: prevStats.totalBytes + newByteCount,
+        totalMessages: prevStats.totalMessages + newMessageCount,
+        messagesPerSecond: Math.round(messagesPerSecond * 10) / 10
+      }));
+      
+      lastStatsUpdateRef.current = now;
+      messageCountSinceLastUpdateRef.current = 0;
+    } else {
+      messageCountSinceLastUpdateRef.current += newMessageCount;
+      setStats(prevStats => ({
+        ...prevStats,
+        totalBytes: prevStats.totalBytes + newByteCount
+      }));
+    }
+  }, []);
+
+  /**
+   * Main monitoring loop that continuously reads data from the USB device
+   * Runs in a requestAnimationFrame loop for smooth performance
+   */
+  const serialMonitoringLoop = useCallback(async () => {
+    // Check if we should continue monitoring
+    if (!device || !keepMonitoringRef.current || deviceEndpoints.endpointInNumber === -1) {
+      return;
+    }
+
+    try {
+      // Ensure device is still open and ready
+      if (!device.opened) {
+        console.warn("[SerialMonitor] Device was closed, attempting to reopen...");
+        await device.open();
+        if (device.configuration === null) {
+          await device.selectConfiguration(1);
+        }
+        await device.claimInterface(deviceEndpoints.interfaceNumber);
+        console.log("[SerialMonitor] Device reopened successfully");
+      }
+
+      // Read data from the USB device
+      const transferResult = await device.transferIn(deviceEndpoints.endpointInNumber, SERIAL_BUFFER_SIZE);
+      
+      if (transferResult.status === 'ok' && transferResult.data && transferResult.data.byteLength > 0) {
+        const receivedBytes = new Uint8Array(transferResult.data.buffer);
+        const timestamp = new Date().toLocaleTimeString();
+        
+        // Create a new message entry for the serial log
+        const newMessage = {
+          id: Date.now() + Math.random(), // Unique ID for React key
+          timestamp: timestamp,
+          bytes: receivedBytes,
+          hexString: formatBytesAsHex(receivedBytes),
+          asciiString: formatBytesAsAscii(receivedBytes),
+          byteCount: receivedBytes.length
+        };
+
+        // Add message to the log (keep last 100 messages for performance)
+        setSerialMessages(prevMessages => {
+          const updatedMessages = [...prevMessages, newMessage];
+          return updatedMessages.slice(-100);
+        });
+
+        // Update statistics
+        updateStatistics(1, receivedBytes.length);
+        
+        // Clear any previous errors
+        setSerialError(null);
+
+      } else if (transferResult.status === 'stall') {
+        console.warn(`[SerialMonitor] USB endpoint stalled, attempting to clear...`);
+        await device.clearHalt('in', deviceEndpoints.endpointInNumber);
+      } else if (transferResult.status === 'babble') {
+        console.warn(`[SerialMonitor] USB endpoint babbled - check ESP32 firmware`);
+      }
+
+    } catch (error) {
+      console.error('[SerialMonitor] Read error:', error);
+      
+      // Handle device disconnection
+      if (error.message.includes("disconnected") || 
+          error.message.includes("No such device") || 
+          error.message.includes("The device was disconnected")) {
+        setSerialError("Device disconnected during monitoring");
+        stopSerialMonitoring();
+        return;
+      } else {
+        setSerialError(`Read error: ${error.message}`);
+      }
+    }
+
+    // Continue the monitoring loop
+    if (keepMonitoringRef.current) {
+      monitoringLoopRef.current = requestAnimationFrame(serialMonitoringLoop);
+    }
+  }, [device, deviceEndpoints, formatBytesAsHex, formatBytesAsAscii, updateStatistics]);
+
+  /**
+   * Starts the serial monitoring process
+   */
+  const startSerialMonitoring = useCallback(() => {
+    if (!device || !isConnected || deviceEndpoints.endpointInNumber === -1) {
+      setSerialError("Cannot start monitoring: Device not connected");
+      return;
+    }
+
+    console.log("[SerialMonitor] Starting serial monitoring...");
+    setSerialError(null);
+    setIsMonitoring(true);
+    keepMonitoringRef.current = true;
+    
+    // Reset statistics
+    setStats({ totalBytes: 0, totalMessages: 0, messagesPerSecond: 0 });
+    lastStatsUpdateRef.current = Date.now();
+    messageCountSinceLastUpdateRef.current = 0;
+    
+    // Start the monitoring loop
+    monitoringLoopRef.current = requestAnimationFrame(serialMonitoringLoop);
+  }, [device, isConnected, deviceEndpoints, serialMonitoringLoop]);
+
+  /**
+   * Stops the serial monitoring process
+   */
+  const stopSerialMonitoring = useCallback(() => {
+    console.log("[SerialMonitor] Stopping serial monitoring...");
+    setIsMonitoring(false);
+    keepMonitoringRef.current = false;
+    
+    if (monitoringLoopRef.current) {
+      cancelAnimationFrame(monitoringLoopRef.current);
+      monitoringLoopRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Sends a command to the USB device (if OUT endpoint is available)
+   */
+  const sendCommand = useCallback(async () => {
+    if (!device || !isConnected || deviceEndpoints.endpointOutNumber === -1 || !commandToSend.trim()) {
+      setSerialError("Cannot send command: No output endpoint or empty command");
+      return;
+    }
+
+    try {
+      // Convert command string to bytes
+      const commandBytes = new TextEncoder().encode(commandToSend + '\n');
+      
+      // Send command to device
+      const transferResult = await device.transferOut(deviceEndpoints.endpointOutNumber, commandBytes);
+      
+      if (transferResult.status === 'ok') {
+        console.log(`[SerialMonitor] Sent command: ${commandToSend}`);
+        setCommandToSend(''); // Clear input field
+        
+        // Add sent command to message log for reference
+        const timestamp = new Date().toLocaleTimeString();
+        const sentMessage = {
+          id: Date.now() + Math.random(),
+          timestamp: timestamp,
+          bytes: commandBytes,
+          hexString: formatBytesAsHex(commandBytes),
+          asciiString: commandToSend,
+          byteCount: commandBytes.length,
+          isSent: true // Flag to distinguish sent vs received messages
+        };
+        
+        setSerialMessages(prevMessages => [...prevMessages, sentMessage].slice(-100));
+      } else {
+        setSerialError(`Failed to send command: ${transferResult.status}`);
+      }
+    } catch (error) {
+      console.error('[SerialMonitor] Send error:', error);
+      setSerialError(`Send error: ${error.message}`);
+    }
+  }, [device, isConnected, deviceEndpoints, commandToSend, formatBytesAsHex]);
+
+  /**
+   * Clears all messages from the serial log
+   */
+  const clearMessages = useCallback(() => {
+    setSerialMessages([]);
+    setStats({ totalBytes: 0, totalMessages: 0, messagesPerSecond: 0 });
+  }, []);
+
+  /**
+   * Copies all messages to clipboard as text
+   */
+  const copyToClipboard = useCallback(() => {
+    const textContent = serialMessages.map(msg => 
+      `[${msg.timestamp}] ${msg.isSent ? 'SENT' : 'RECV'}: ${msg.asciiString} (${msg.hexString})`
+    ).join('\n');
+    
+    navigator.clipboard.writeText(textContent).then(() => {
+      console.log('[SerialMonitor] Messages copied to clipboard');
+    }).catch(err => {
+      console.error('[SerialMonitor] Failed to copy to clipboard:', err);
+    });
+  }, [serialMessages]);
+
+  /**
+   * Auto-scroll to bottom when new messages arrive
+   */
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollContainer) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }
+    }
+  }, [serialMessages]);
+
+  /**
+   * Cleanup on component unmount
+   */
+  useEffect(() => {
+    return () => {
+      stopSerialMonitoring();
+    };
+  }, [stopSerialMonitoring]);
+
+  return (
+    <Card className="bg-gray-800 border-gray-700">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg text-gray-100 flex items-center">
+            <Terminal className="w-5 h-5 mr-2 text-cyan-400" />
+            Serial Monitor
+          </CardTitle>
+          <div className="flex items-center space-x-2">
+            <Badge variant="outline" className="text-xs">
+              {stats.totalMessages} msgs
+            </Badge>
+            <Badge variant="outline" className="text-xs">
+              {stats.totalBytes} bytes
+            </Badge>
+            <Badge variant="outline" className="text-xs">
+              {stats.messagesPerSecond} msg/s
+            </Badge>
+          </div>
+        </div>
+      </CardHeader>
+      
+      <CardContent className="space-y-4">
+        {serialError && (
+          <Alert variant="destructive">
+            <AlertDescription>{serialError}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* Control buttons */}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={isMonitoring ? stopSerialMonitoring : startSerialMonitoring}
+            disabled={!isConnected}
+            variant={isMonitoring ? "destructive" : "default"}
+            size="sm"
+          >
+            {isMonitoring ? 'Stop Monitor' : 'Start Monitor'}
+          </Button>
+          
+          <Button onClick={clearMessages} variant="outline" size="sm">
+            <Trash2 className="w-4 h-4 mr-1" />
+            Clear
+          </Button>
+          
+          <Button onClick={copyToClipboard} variant="outline" size="sm" disabled={serialMessages.length === 0}>
+            <Copy className="w-4 h-4 mr-1" />
+            Copy
+          </Button>
+        </div>
+
+        {/* Command input (only show if OUT endpoint is available) */}
+        {deviceEndpoints.endpointOutNumber !== -1 && (
+          <div className="flex gap-2">
+            <Input
+              placeholder="Enter command to send..."
+              value={commandToSend}
+              onChange={(e) => setCommandToSend(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && sendCommand()}
+              className="bg-gray-700 border-gray-600 text-gray-100"
+              disabled={!isConnected}
+            />
+            <Button onClick={sendCommand} disabled={!isConnected || !commandToSend.trim()} size="sm">
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+        )}
+
+        {/* Messages display */}
+        <div className="bg-gray-900 rounded border border-gray-600 h-64">
+          <ScrollArea className="h-full p-2" ref={scrollAreaRef}>
+            {serialMessages.length === 0 ? (
+              <p className="text-gray-500 text-sm text-center py-8">
+                {isMonitoring ? 'Listening for data...' : 'Start monitoring to see incoming data'}
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {serialMessages.map((message) => (
+                  <div key={message.id} className="text-xs font-mono">
+                    <div className="flex items-start gap-2">
+                      <span className="text-gray-400 shrink-0">[{message.timestamp}]</span>
+                      <Badge 
+                        variant={message.isSent ? "default" : "secondary"} 
+                        className="text-xs shrink-0"
+                      >
+                        {message.isSent ? 'SENT' : 'RECV'}
+                      </Badge>
+                      <span className="text-gray-300 break-all">{message.asciiString}</span>
+                    </div>
+                    <div className="text-gray-500 ml-20 break-all">
+                      HEX: {message.hexString} ({message.byteCount} bytes)
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </div>
+
+        <p className="text-xs text-gray-400">
+          This monitor shows raw data received from the USB device. Use it to debug communication and verify data flow.
+          {deviceEndpoints.endpointOutNumber === -1 && " (No output endpoint found - sending commands not available)"}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}

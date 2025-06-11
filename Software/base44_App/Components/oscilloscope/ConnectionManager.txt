@@ -1,0 +1,415 @@
+
+import React, { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Usb, XCircle, CheckCircle, ZapOff, Zap, HelpCircle, AlertTriangle } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+
+// Local storage keys for persisting VID/PID values
+const LOCAL_STORAGE_VID_KEY = 'miniscope_vid';
+const LOCAL_STORAGE_PID_KEY = 'miniscope_pid';
+
+/**
+ * ConnectionManager Component
+ * 
+ * Handles WebUSB connection to ESP32 devices
+ * Manages device selection, interface claiming, and connection state
+ * 
+ * Props:
+ * - onConnect: Callback function called when device connects (device, error, endpoints)
+ * - onDisconnect: Callback function called when device disconnects
+ * - isConnected: Boolean indicating current connection status
+ * - connectionError: String with current connection error message
+ */
+export default function ConnectionManager({ onConnect, onDisconnect, isConnected, connectionError }) {
+  // State for connection process
+  const [isConnecting, setIsConnecting] = useState(false);
+  
+  // USB device identifiers - loaded from localStorage for persistence
+  const [vendorId, setVendorId] = useState(() => localStorage.getItem(LOCAL_STORAGE_VID_KEY) || '');
+  const [productId, setProductId] = useState(() => localStorage.getItem(LOCAL_STORAGE_PID_KEY) || '');
+
+  /**
+   * Save VID to localStorage whenever it changes
+   */
+  useEffect(() => {
+    localStorage.setItem(LOCAL_STORAGE_VID_KEY, vendorId);
+  }, [vendorId]);
+
+  /**
+   * Save PID to localStorage whenever it changes
+   */
+  useEffect(() => {
+    localStorage.setItem(LOCAL_STORAGE_PID_KEY, productId);
+  }, [productId]);
+
+  /**
+   * Main connection handler
+   * Implements WebUSB device selection and interface claiming
+   */
+  const handleDeviceConnection = async () => {
+    // Check if WebUSB is supported by the browser
+    if (!navigator.usb) {
+      onConnect(null, "WebUSB is not supported by your browser. Please use Chrome, Edge, or Opera.");
+      return;
+    }
+
+    setIsConnecting(true);
+
+    try {
+      // Build device filters based on provided VID/PID
+      const deviceFilters = buildDeviceFilters(vendorId, productId);
+      
+      console.log("[ConnectionManager] Requesting USB device with filters:", deviceFilters);
+      const selectedDevice = await navigator.usb.requestDevice({ filters: deviceFilters });
+      
+      if (!selectedDevice) {
+        setIsConnecting(false);
+        onConnect(null, "No device selected or device selection was cancelled.");
+        return; 
+      }
+
+      console.log(`[ConnectionManager] Device selected: ${selectedDevice.productName || "Unknown Device"} (VID: 0x${selectedDevice.vendorId.toString(16)}, PID: 0x${selectedDevice.productId.toString(16)})`);
+      
+      // Open and configure the device
+      const deviceEndpoints = await openAndConfigureDevice(selectedDevice);
+      
+      // Report successful connection
+      onConnect(selectedDevice, null, deviceEndpoints);
+      
+    } catch (error) {
+      console.error("[ConnectionManager] Connection failed:", error);
+      handleConnectionError(error);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  /**
+   * Builds device filter array for USB device selection
+   * If VID/PID are provided, creates specific filter
+   * Otherwise returns empty filters for broader device selection
+   */
+  const buildDeviceFilters = (vid, pid) => {
+    const filters = [];
+    
+    if (vid && pid) {
+      try {
+        const numericVid = parseInt(vid, 16);
+        const numericPid = parseInt(pid, 16);
+        
+        if (!isNaN(numericVid) && !isNaN(numericPid)) {
+          filters.push({ usbVendorId: numericVid, usbProductId: numericPid });
+          console.log(`[ConnectionManager] Using specific filter - VID: 0x${numericVid.toString(16)}, PID: 0x${numericPid.toString(16)}`);
+        } else {
+          throw new Error("Invalid VID/PID format");
+        }
+      } catch (e) {
+        throw new Error("Invalid VID/PID format. Please use hexadecimal values (e.g., 10C4).");
+      }
+    } else {
+      console.log("[ConnectionManager] No VID/PID provided, using broad device selection");
+      // Empty filters will show all available USB devices
+      // This lets user choose from available serial-like devices
+    }
+    
+    return filters;
+  };
+
+  /**
+   * Opens USB device and configures it for communication
+   * Finds appropriate interface and endpoints for data transfer
+   */
+  const openAndConfigureDevice = async (device) => {
+    console.log("[ConnectionManager] Opening device...");
+    await device.open();
+    
+    // Select device configuration (usually configuration 1)
+    if (device.configuration === null) {
+      console.log("[ConnectionManager] Selecting device configuration 1...");
+      await device.selectConfiguration(1); 
+    } else {
+      console.log("[ConnectionManager] Device already has configuration selected:", device.configuration.configurationValue);
+    }
+    
+    // Find suitable interface and endpoints
+    const endpoints = findSuitableInterface(device);
+    
+    if (endpoints.interfaceNumber === -1) {
+      await device.close();
+      throw new Error(
+        "Could not find a suitable USB CDC Data interface. " +
+        "Your ESP32 firmware must implement a CDC (Communication Device Class) interface " +
+        "with a Data Class (0x0A) interface that has bulk IN/OUT endpoints for data transfer."
+      );
+    }
+    
+    // Claim the interface for exclusive access
+    console.log(`[ConnectionManager] Attempting to claim interface ${endpoints.interfaceNumber}...`);
+    try {
+      await device.claimInterface(endpoints.interfaceNumber);
+      console.log(`[ConnectionManager] Interface ${endpoints.interfaceNumber} claimed successfully.`);
+    } catch (claimError) {
+      await device.close();
+      console.error(`[ConnectionManager] Error claiming interface ${endpoints.interfaceNumber}:`, claimError);
+      throw new Error(
+        `Unable to claim interface ${endpoints.interfaceNumber}. ` +
+        "This usually means:\n" +
+        "1. Another application or driver is using the device (close Arduino IDE, PlatformIO, other serial terminals, or check for system drivers like WinUSB/libusb that might have auto-claimed it).\n" +
+        "2. Device driver is interfering (try a different USB port, or check for driver conflicts in Device Manager on Windows).\n" +
+        "3. The device needs to be reset or reconnected.\n" +
+        "4. Incorrect interface selected by this application (check console logs for interface details).\n" +
+        `Original error: ${claimError.message}`
+      );
+    }
+    
+    return endpoints;
+  };
+
+  /**
+   * Searches device interfaces for a suitable CDC (Communication Device Class)
+   * Data interface. Prioritizes CDC Data Class (0x0A) with bulk endpoints.
+   */
+  const findSuitableInterface = (device) => {
+    let cdcDataInterfaceInfo = null;    // Preferred: CDC Data Class Interface (0x0A)
+    let cdcCommInterfaceWithBulkInfo = null; // Fallback: CDC Comm Class (0x02) with bulk EPs
+
+    console.log("[ConnectionManager] Scanning device configuration for suitable interfaces...");
+    if (!device.configuration || !device.configuration.interfaces) {
+        console.error("[ConnectionManager] Device configuration or interfaces not available.");
+        return { interfaceNumber: -1, endpointInNumber: -1, endpointOutNumber: -1 };
+    }
+    
+    console.log(`[ConnectionManager] Device has ${device.configuration.interfaces.length} interface(s).`);
+
+    for (const configInterface of device.configuration.interfaces) {
+      console.log(`[ConnectionManager] Inspecting Interface Number: ${configInterface.interfaceNumber}`);
+      for (const alternate of configInterface.alternates) {
+        console.log(`[ConnectionManager]  -> Alternate Setting: ${alternate.alternateSetting}, Interface Class: 0x${alternate.interfaceClass.toString(16).padStart(2, '0')}, SubClass: 0x${alternate.interfaceSubclass.toString(16).padStart(2, '0')}, Protocol: 0x${alternate.interfaceProtocol.toString(16).padStart(2, '0')}`);
+        
+        let currentInEndpoint = -1;
+        let currentOutEndpoint = -1;
+        let hasInBulkEndpoint = false;
+        let hasOutBulkEndpoint = false;
+
+        alternate.endpoints.forEach(ep => {
+          console.log(`[ConnectionManager]    - Endpoint ${ep.endpointNumber}: Type '${ep.type}', Direction '${ep.direction}'`);
+          if (ep.type === "bulk") {
+            if (ep.direction === "in") {
+              currentInEndpoint = ep.endpointNumber;
+              hasInBulkEndpoint = true;
+            }
+            if (ep.direction === "out") {
+              currentOutEndpoint = ep.endpointNumber;
+              hasOutBulkEndpoint = true;
+            }
+          }
+        });
+
+        if (hasInBulkEndpoint) { // Must have at least a bulk IN endpoint
+          if (alternate.interfaceClass === 0x0A) { // CDC Data Class Interface
+            console.log(`[ConnectionManager] Found CDC Data Interface (0x0A) on Interface ${configInterface.interfaceNumber} with Bulk IN EP ${currentInEndpoint}. This is the PREFERRED interface.`);
+            cdcDataInterfaceInfo = {
+              interfaceNumber: configInterface.interfaceNumber,
+              endpointInNumber: currentInEndpoint,
+              endpointOutNumber: currentOutEndpoint, // Might be -1 if no bulk OUT
+            };
+            break; // Found preferred, stop searching alternates for this interface
+          } else if (alternate.interfaceClass === 0x02 && (alternate.interfaceSubclass === 0x02 /* ACM */ || alternate.interfaceSubclass === 0x06 /* ECM */)) {
+            // This is a CDC Communication Class interface (e.g., ACM).
+            // Standard ACM uses this for control and a *separate* Data Class Interface for data.
+            // However, some devices might implement bulk pipes on an ACM interface directly.
+            console.log(`[ConnectionManager] Found CDC Communication Interface (0x02, SubClass 0x${alternate.interfaceSubclass.toString(16).padStart(2, '0')}) on Interface ${configInterface.interfaceNumber} with Bulk IN EP ${currentInEndpoint}. Considering as FALLBACK.`);
+            if (!cdcCommInterfaceWithBulkInfo) { // Take the first one found as a fallback
+              cdcCommInterfaceWithBulkInfo = {
+                interfaceNumber: configInterface.interfaceNumber,
+                endpointInNumber: currentInEndpoint,
+                endpointOutNumber: currentOutEndpoint,
+              };
+            }
+          } else {
+            console.log(`[ConnectionManager] Interface ${configInterface.interfaceNumber} (Class 0x${alternate.interfaceClass.toString(16).padStart(2,'0')}) has bulk IN EP but is not CDC Data (0x0A) or known CDC Comm (0x02). Ignoring for now.`);
+          }
+        } else {
+            console.log(`[ConnectionManager] Interface ${configInterface.interfaceNumber}, Alt ${alternate.alternateSetting} has no bulk IN endpoint. Skipping.`);
+        }
+      }
+      if (cdcDataInterfaceInfo) break; // Found preferred CDC Data Interface, stop searching other interfaces
+    }
+
+    if (cdcDataInterfaceInfo) {
+      console.log("[ConnectionManager] Selected PREFERRED CDC Data Interface:", cdcDataInterfaceInfo);
+      return cdcDataInterfaceInfo;
+    } else if (cdcCommInterfaceWithBulkInfo) {
+      console.warn("[ConnectionManager] Selected FALLBACK CDC Communication Interface with bulk endpoints:", cdcCommInterfaceWithBulkInfo);
+      return cdcCommInterfaceWithBulkInfo;
+    }
+
+    console.error("[ConnectionManager] CRITICAL: No suitable USB interface found. Ensure your ESP32 firmware correctly exposes a CDC Data Interface (Class 0x0A) with a Bulk IN endpoint.");
+    return { interfaceNumber: -1, endpointInNumber: -1, endpointOutNumber: -1 };
+  };
+
+  /**
+   * Handles and categorizes connection errors for user feedback
+   */
+  const handleConnectionError = (error) => {
+    let userFriendlyMessage;
+    
+    if (error.message.includes("No device selected")) {
+      userFriendlyMessage = "Device selection was cancelled.";
+    } else if (error.message.includes("Unable to claim interface")) {
+      userFriendlyMessage = error.message; // Already formatted above
+    } else if (error.message.includes("Could not find a suitable")) {
+      userFriendlyMessage = error.message; // Already formatted above  
+    } else if (error.message.includes("Invalid VID/PID")) {
+      userFriendlyMessage = error.message; // Already formatted above
+    } else {
+      userFriendlyMessage = `Connection failed: ${error.message}`;
+    }
+    
+    onConnect(null, userFriendlyMessage);
+  };
+
+  /**
+   * Input handlers with automatic uppercase conversion for hex values
+   */
+  const handleVidChange = (e) => setVendorId(e.target.value.toUpperCase());
+  const handlePidChange = (e) => setProductId(e.target.value.toUpperCase());
+
+  return (
+    <Card className="bg-gray-800 border-gray-700 shadow-lg">
+      <CardHeader>
+        <CardTitle className="text-lg text-gray-100">Device Connection</CardTitle>
+        <CardDescription className="text-gray-400">
+          Connect to your ESP32 Miniscope device via WebUSB.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Connection error display */}
+        {connectionError && (
+          <Alert variant="destructive" className="mb-4">
+            <XCircle className="h-4 w-4" />
+            <AlertTitle>Connection Error</AlertTitle>
+            <AlertDescription className="whitespace-pre-line">{connectionError}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* Special alert for interface claiming issues */}
+        {connectionError && connectionError.includes("Unable to claim interface") && (
+          <Alert className="mb-4 bg-orange-900/30 border-orange-700 text-orange-200">
+            <AlertTriangle className="h-4 w-4 !text-orange-400" />
+            <AlertTitle className="text-orange-300">Troubleshooting Interface Issues</AlertTitle>
+            <AlertDescription>
+              <ul className="list-disc list-inside space-y-1 text-sm">
+                <li>Close Arduino IDE, PlatformIO, or any serial monitor applications</li>
+                <li>Try a different USB port or cable</li>
+                <li>Disconnect and reconnect your ESP32</li>
+                <li>On Windows, check Device Manager for driver conflicts</li>
+                <li>Try using a USB hub or direct motherboard connection</li>
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* VID/PID input section */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+          <div>
+            <Label htmlFor="vendorId" className="text-sm text-gray-300 flex items-center">
+              Vendor ID (VID)
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="w-3.5 h-3.5 ml-1 text-gray-500 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent className="bg-gray-900 text-gray-200 border-gray-700">
+                    <p>Hexadecimal value (e.g., 10C4). Find in Device Manager (Windows) or System Information (macOS).</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </Label>
+            <Input 
+              id="vendorId" 
+              type="text" 
+              placeholder="e.g., 10C4" 
+              value={vendorId} 
+              onChange={handleVidChange}
+              className="bg-gray-700 border-gray-600 text-gray-100 h-9 placeholder:text-gray-500"
+              disabled={isConnected || isConnecting}
+            />
+          </div>
+          <div>
+            <Label htmlFor="productId" className="text-sm text-gray-300 flex items-center">
+              Product ID (PID)
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="w-3.5 h-3.5 ml-1 text-gray-500 cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent className="bg-gray-900 text-gray-200 border-gray-700">
+                    <p>Hexadecimal value (e.g., EA60). Found in Device Manager (Windows) or System Information (macOS).</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </Label>
+            <Input 
+              id="productId" 
+              type="text" 
+              placeholder="e.g., EA60" 
+              value={productId} 
+              onChange={handlePidChange}
+              className="bg-gray-700 border-gray-600 text-gray-100 h-9 placeholder:text-gray-500"
+              disabled={isConnected || isConnecting}
+            />
+          </div>
+        </div>
+        
+        <p className="text-xs text-gray-400">
+          <strong>VID/PID Help:</strong> If you know your ESP32's USB identifiers, enter them above for direct connection. 
+          Leave blank to see all available USB devices (you'll need to identify your ESP32 from the list).
+        </p>
+
+        {/* Connection/Disconnection buttons */}
+        {isConnected ? (
+          <div className="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-3">
+            <Button onClick={onDisconnect} variant="destructive" className="w-full sm:w-auto bg-red-600 hover:bg-red-700">
+              <ZapOff className="mr-2 h-4 w-4" /> Disconnect Device
+            </Button>
+            <div className="flex items-center text-green-400">
+              <CheckCircle className="mr-2 h-5 w-5" />
+              <span>Connected to Miniscope</span>
+            </div>
+          </div>
+        ) : (
+          <Button 
+            onClick={handleDeviceConnection} 
+            disabled={isConnecting} 
+            className="w-full bg-cyan-500 hover:bg-cyan-600"
+          >
+            <Usb className="mr-2 h-4 w-4" /> 
+            {isConnecting ? 'Connecting...' : 'Connect to Miniscope'}
+          </Button>
+        )}
+
+        {/* Browser compatibility warning */}
+        {!navigator.usb && (
+           <Alert variant="warning" className="mt-4 bg-yellow-900/30 border-yellow-700 text-yellow-200">
+            <XCircle className="h-4 w-4 !text-yellow-400" />
+            <AlertTitle className="text-yellow-300">Browser Not Supported</AlertTitle>
+            <AlertDescription>
+              WebUSB is not supported in this browser. Please use Chrome, Edge, or Opera on desktop or Android.
+              Safari and Firefox do not support WebUSB.
+            </AlertDescription>
+          </Alert>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

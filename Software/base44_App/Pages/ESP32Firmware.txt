@@ -1,0 +1,584 @@
+import React from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Code, Cpu, Download, Settings, Zap, FileText } from 'lucide-react';
+
+const CodeBlock = ({ title, language, children }) => (
+  <div className="bg-gray-900 rounded-lg border border-gray-600 overflow-hidden">
+    <div className="bg-gray-800 px-4 py-2 text-sm text-gray-300 border-b border-gray-600">
+      {title}
+    </div>
+    <pre className="p-4 overflow-x-auto text-sm">
+      <code className="text-gray-100">{children}</code>
+    </pre>
+  </div>
+);
+
+const Section = ({ title, icon, children }) => (
+  <Card className="bg-gray-800 border-gray-700 shadow-md">
+    <CardHeader>
+      <CardTitle className="text-xl text-gray-100 flex items-center">
+        {React.createElement(icon, { className: "w-6 h-6 mr-3 text-cyan-400"})}
+        {title}
+      </CardTitle>
+    </CardHeader>
+    <CardContent className="text-gray-300 space-y-4">
+      {children}
+    </CardContent>
+  </Card>
+);
+
+export default function ESP32FirmwarePage() {
+  return (
+    <div className="space-y-8 max-w-6xl mx-auto">
+      <header className="text-center py-6">
+        <h1 className="text-4xl font-bold text-gray-100">ESP32-S3 WebUSB Firmware</h1>
+        <p className="text-lg text-gray-400 mt-2">
+          Complete firmware setup for ESP32-S3 to send raw data via USB to the WebUSB browser app
+        </p>
+      </header>
+
+      <Alert className="bg-blue-900/30 border-blue-700 text-blue-200">
+        <Zap className="h-4 w-4 !text-blue-400" />
+        <AlertTitle className="text-blue-300">Important Note</AlertTitle>
+        <AlertDescription>
+          This firmware uses TinyUSB with CDC (Communication Device Class) which is fully compatible with WebUSB. 
+          The ESP32-S3 will appear as a USB serial device that can be accessed by the browser WebUSB API.
+        </AlertDescription>
+      </Alert>
+
+      <Section title="Project Structure" icon={FileText}>
+        <p>Create a new PlatformIO project with the following structure:</p>
+        <CodeBlock title="Project Directory Structure">
+{`esp32-webusb-firmware/
+├── platformio.ini
+├── src/
+│   ├── main.cpp
+│   ├── usb_handler.cpp
+│   ├── usb_handler.hpp
+│   ├── data_generator.cpp
+│   └── data_generator.hpp
+└── include/
+    └── config.h`}
+        </CodeBlock>
+      </Section>
+
+      <Section title="PlatformIO Configuration" icon={Settings}>
+        <CodeBlock title="platformio.ini">
+{`[env:esp32-s3-devkitc-1]
+platform = espressif32
+board = esp32-s3-devkitc-1
+framework = arduino
+
+; TinyUSB configuration
+lib_deps = 
+    adafruit/Adafruit TinyUSB Library @ ^3.1.0
+
+; Build flags for USB functionality
+build_flags = 
+    -DARDUINO_USB_MODE=1
+    -DARDUINO_USB_CDC_ON_BOOT=1
+    -DCFG_TUD_CDC=1
+    -DCFG_TUD_CDC_RX_BUFSIZE=512
+    -DCFG_TUD_CDC_TX_BUFSIZE=512
+
+; Monitor configuration
+monitor_speed = 115200
+monitor_filters = esp32_exception_decoder
+
+; Upload configuration
+upload_speed = 921600`}
+        </CodeBlock>
+      </Section>
+
+      <Section title="Configuration Header" icon={Code}>
+        <CodeBlock title="include/config.h">
+{`#ifndef CONFIG_H
+#define CONFIG_H
+
+// Hardware configuration
+#define ADC_REFERENCE_VOLTAGE 3.3f    // ESP32-S3 ADC reference voltage
+#define ADC_RESOLUTION_BITS 8         // 8-bit ADC data (0-255)
+#define ADC_MAX_VALUE 255             // Maximum ADC value
+
+// Data acquisition settings
+#define SAMPLE_RATE_HZ 1000           // 1kHz sample rate
+#define SAMPLES_PER_PACKET 64         // Samples to send per USB packet
+#define USB_PACKET_INTERVAL_MS (SAMPLES_PER_PACKET * 1000 / SAMPLE_RATE_HZ)
+
+// USB configuration
+#define USB_VID 0x303A                // Espressif VID
+#define USB_PID 0x8166                // ESP32-S3 PID
+#define USB_MANUFACTURER "Espressif"
+#define USB_PRODUCT "ESP32-S3 Miniscope"
+#define USB_SERIAL "123456"
+
+// Debug settings
+#define ENABLE_SERIAL_DEBUG 1
+#define DEBUG_PRINT_INTERVAL_MS 5000
+
+#endif // CONFIG_H`}
+        </CodeBlock>
+      </Section>
+
+      <Section title="Data Generator Module" icon={Zap}>
+        <CodeBlock title="src/data_generator.hpp">
+{`#ifndef DATA_GENERATOR_HPP
+#define DATA_GENERATOR_HPP
+
+#include <Arduino.h>
+#include "config.h"
+
+class DataGenerator {
+public:
+    DataGenerator();
+    void begin();
+    void generateSamples(uint8_t* buffer, size_t count);
+    void update(); // Call periodically for time-based patterns
+    
+private:
+    uint32_t _sampleCounter;
+    uint32_t _lastUpdateTime;
+    float _phaseAccumulator;
+    
+    // Different waveform generators
+    uint8_t generateSineWave();
+    uint8_t generateSquareWave();
+    uint8_t generateSawWave();
+    uint8_t generateNoise();
+    uint8_t generateMixedSignal();
+};
+
+#endif // DATA_GENERATOR_HPP`}
+        </CodeBlock>
+
+        <CodeBlock title="src/data_generator.cpp">
+{`#include "data_generator.hpp"
+#include <math.h>
+
+DataGenerator::DataGenerator() 
+    : _sampleCounter(0), _lastUpdateTime(0), _phaseAccumulator(0.0f) {
+}
+
+void DataGenerator::begin() {
+    _sampleCounter = 0;
+    _lastUpdateTime = millis();
+    _phaseAccumulator = 0.0f;
+    
+    // Seed random number generator
+    randomSeed(analogRead(0));
+    
+    #if ENABLE_SERIAL_DEBUG
+    Serial.println("DataGenerator initialized");
+    #endif
+}
+
+void DataGenerator::update() {
+    uint32_t currentTime = millis();
+    if (currentTime - _lastUpdateTime >= 1000) {
+        _lastUpdateTime = currentTime;
+        
+        #if ENABLE_SERIAL_DEBUG
+        Serial.printf("Generated %u samples in last second\\n", _sampleCounter);
+        #endif
+        
+        _sampleCounter = 0;
+    }
+}
+
+void DataGenerator::generateSamples(uint8_t* buffer, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        // Generate mixed signal: sine + square + noise
+        buffer[i] = generateMixedSignal();
+        _sampleCounter++;
+    }
+}
+
+uint8_t DataGenerator::generateSineWave() {
+    // 50Hz sine wave
+    float frequency = 50.0f;
+    float omega = 2.0f * PI * frequency / SAMPLE_RATE_HZ;
+    
+    _phaseAccumulator += omega;
+    if (_phaseAccumulator >= 2.0f * PI) {
+        _phaseAccumulator -= 2.0f * PI;
+    }
+    
+    float sineValue = sin(_phaseAccumulator);
+    // Convert from [-1, 1] to [0, 255]
+    return (uint8_t)((sineValue + 1.0f) * 127.5f);
+}
+
+uint8_t DataGenerator::generateSquareWave() {
+    // 25Hz square wave
+    uint32_t period = SAMPLE_RATE_HZ / 25;
+    uint32_t halfPeriod = period / 2;
+    
+    return ((_sampleCounter % period) < halfPeriod) ? 200 : 55;
+}
+
+uint8_t DataGenerator::generateSawWave() {
+    // 10Hz sawtooth wave
+    uint32_t period = SAMPLE_RATE_HZ / 10;
+    uint32_t position = _sampleCounter % period;
+    
+    return (uint8_t)((position * 255) / period);
+}
+
+uint8_t DataGenerator::generateNoise() {
+    return random(0, 256);
+}
+
+uint8_t DataGenerator::generateMixedSignal() {
+    // Combine multiple waveforms
+    float sine = generateSineWave() / 255.0f;
+    float square = generateSquareWave() / 255.0f;
+    float noise = generateNoise() / 255.0f;
+    
+    // Mix: 60% sine, 30% square, 10% noise
+    float mixed = (sine * 0.6f) + (square * 0.3f) + (noise * 0.1f);
+    
+    // Convert back to uint8_t
+    return (uint8_t)(mixed * 255.0f);
+}`}
+        </CodeBlock>
+      </Section>
+
+      <Section title="USB Handler Module" icon={Download}>
+        <CodeBlock title="src/usb_handler.hpp">
+{`#ifndef USB_HANDLER_HPP
+#define USB_HANDLER_HPP
+
+#include <Arduino.h>
+#include "Adafruit_TinyUSB.h"
+#include "config.h"
+
+class USBHandler {
+public:
+    USBHandler();
+    bool begin();
+    void update();
+    bool isConnected();
+    size_t sendData(const uint8_t* data, size_t length);
+    size_t receiveData(uint8_t* buffer, size_t maxLength);
+    
+    // Statistics
+    uint32_t getTotalBytesSent() const { return _totalBytesSent; }
+    uint32_t getTotalPacketsSent() const { return _totalPacketsSent; }
+    float getCurrentTransferRate() const { return _currentTransferRate; }
+    
+private:
+    Adafruit_USBD_CDC _usbSerial;
+    uint32_t _totalBytesSent;
+    uint32_t _totalPacketsSent;
+    uint32_t _lastStatsUpdate;
+    uint32_t _bytesThisSecond;
+    float _currentTransferRate;
+    bool _isConnected;
+    
+    void updateStatistics();
+};
+
+#endif // USB_HANDLER_HPP`}
+        </CodeBlock>
+
+        <CodeBlock title="src/usb_handler.cpp">
+{`#include "usb_handler.hpp"
+
+USBHandler::USBHandler() 
+    : _totalBytesSent(0), _totalPacketsSent(0), _lastStatsUpdate(0),
+      _bytesThisSecond(0), _currentTransferRate(0.0f), _isConnected(false) {
+}
+
+bool USBHandler::begin() {
+    // Initialize TinyUSB
+    if (!TinyUSBDevice.begin()) {
+        #if ENABLE_SERIAL_DEBUG
+        Serial.println("Failed to initialize TinyUSB");
+        #endif
+        return false;
+    }
+    
+    // Set device descriptor
+    TinyUSBDevice.setID(USB_VID, USB_PID);
+    TinyUSBDevice.setManufacturerDescriptor(USB_MANUFACTURER);
+    TinyUSBDevice.setProductDescriptor(USB_PRODUCT);
+    TinyUSBDevice.setSerialDescriptor(USB_SERIAL);
+    
+    // Initialize CDC
+    _usbSerial.begin(115200);
+    
+    _lastStatsUpdate = millis();
+    
+    #if ENABLE_SERIAL_DEBUG
+    Serial.println("USB Handler initialized");
+    Serial.printf("VID: 0x%04X, PID: 0x%04X\\n", USB_VID, USB_PID);
+    #endif
+    
+    return true;
+}
+
+void USBHandler::update() {
+    // Update connection status
+    _isConnected = _usbSerial.connected();
+    
+    // Update statistics
+    updateStatistics();
+    
+    // Handle any incoming data (for future commands)
+    if (_usbSerial.available()) {
+        // Echo back for now - implement command handling here
+        while (_usbSerial.available()) {
+            int byte = _usbSerial.read();
+            if (byte >= 0) {
+                _usbSerial.write((uint8_t)byte);
+            }
+        }
+    }
+}
+
+bool USBHandler::isConnected() {
+    return _isConnected;
+}
+
+size_t USBHandler::sendData(const uint8_t* data, size_t length) {
+    if (!_isConnected || length == 0) {
+        return 0;
+    }
+    
+    size_t bytesSent = _usbSerial.write(data, length);
+    
+    if (bytesSent > 0) {
+        _totalBytesSent += bytesSent;
+        _totalPacketsSent++;
+        _bytesThisSecond += bytesSent;
+    }
+    
+    return bytesSent;
+}
+
+size_t USBHandler::receiveData(uint8_t* buffer, size_t maxLength) {
+    if (!_isConnected) {
+        return 0;
+    }
+    
+    size_t bytesRead = 0;
+    while (_usbSerial.available() && bytesRead < maxLength) {
+        int byte = _usbSerial.read();
+        if (byte >= 0) {
+            buffer[bytesRead++] = (uint8_t)byte;
+        }
+    }
+    
+    return bytesRead;
+}
+
+void USBHandler::updateStatistics() {
+    uint32_t currentTime = millis();
+    
+    if (currentTime - _lastStatsUpdate >= 1000) {
+        _currentTransferRate = _bytesThisSecond;
+        _bytesThisSecond = 0;
+        _lastStatsUpdate = currentTime;
+        
+        #if ENABLE_SERIAL_DEBUG
+        if (_isConnected) {
+            Serial.printf("USB Stats - Connected: %s, Rate: %.1f B/s, Total: %u bytes, %u packets\\n",
+                         _isConnected ? "YES" : "NO", _currentTransferRate, 
+                         _totalBytesSent, _totalPacketsSent);
+        }
+        #endif
+    }
+}`}
+        </CodeBlock>
+      </Section>
+
+      <Section title="Main Application" icon={Cpu}>
+        <CodeBlock title="src/main.cpp">
+{`#include <Arduino.h>
+#include "config.h"
+#include "usb_handler.hpp"
+#include "data_generator.hpp"
+
+// Global objects
+USBHandler usbHandler;
+DataGenerator dataGen;
+
+// Timing variables
+uint32_t lastDataSend = 0;
+uint32_t lastDebugPrint = 0;
+
+// Data buffer
+uint8_t dataBuffer[SAMPLES_PER_PACKET];
+
+void setup() {
+    // Initialize serial for debugging (optional, since we're using USB)
+    #if ENABLE_SERIAL_DEBUG
+    Serial.begin(115200);
+    while (!Serial && millis() < 3000) {
+        delay(10);
+    }
+    Serial.println("ESP32-S3 WebUSB Miniscope Starting...");
+    #endif
+    
+    // Initialize data generator
+    dataGen.begin();
+    
+    // Initialize USB handler
+    if (!usbHandler.begin()) {
+        #if ENABLE_SERIAL_DEBUG
+        Serial.println("Failed to initialize USB handler!");
+        #endif
+        while (1) {
+            delay(1000);
+        }
+    }
+    
+    #if ENABLE_SERIAL_DEBUG
+    Serial.println("System initialized successfully");
+    Serial.printf("Sample rate: %d Hz\\n", SAMPLE_RATE_HZ);
+    Serial.printf("Samples per packet: %d\\n", SAMPLES_PER_PACKET);
+    Serial.printf("Packet interval: %d ms\\n", USB_PACKET_INTERVAL_MS);
+    #endif
+    
+    lastDataSend = millis();
+    lastDebugPrint = millis();
+}
+
+void loop() {
+    uint32_t currentTime = millis();
+    
+    // Update USB handler
+    usbHandler.update();
+    
+    // Update data generator
+    dataGen.update();
+    
+    // Send data at regular intervals
+    if (currentTime - lastDataSend >= USB_PACKET_INTERVAL_MS) {
+        if (usbHandler.isConnected()) {
+            // Generate new data samples
+            dataGen.generateSamples(dataBuffer, SAMPLES_PER_PACKET);
+            
+            // Send data over USB
+            size_t bytesSent = usbHandler.sendData(dataBuffer, SAMPLES_PER_PACKET);
+            
+            if (bytesSent != SAMPLES_PER_PACKET) {
+                #if ENABLE_SERIAL_DEBUG
+                Serial.printf("Warning: Only sent %d/%d bytes\\n", bytesSent, SAMPLES_PER_PACKET);
+                #endif
+            }
+        }
+        
+        lastDataSend = currentTime;
+    }
+    
+    // Debug information
+    #if ENABLE_SERIAL_DEBUG
+    if (currentTime - lastDebugPrint >= DEBUG_PRINT_INTERVAL_MS) {
+        Serial.printf("\\n=== ESP32-S3 Miniscope Status ===\\n");
+        Serial.printf("USB Connected: %s\\n", usbHandler.isConnected() ? "YES" : "NO");
+        Serial.printf("Transfer Rate: %.1f bytes/sec\\n", usbHandler.getCurrentTransferRate());
+        Serial.printf("Total Sent: %u bytes, %u packets\\n", 
+                     usbHandler.getTotalBytesSent(), usbHandler.getTotalPacketsSent());
+        Serial.printf("Free Heap: %u bytes\\n", ESP.getFreeHeap());
+        Serial.printf("Uptime: %u seconds\\n", millis() / 1000);
+        Serial.println("================================\\n");
+        
+        lastDebugPrint = currentTime;
+    }
+    #endif
+    
+    // Small delay to prevent watchdog issues
+    delay(1);
+}`}
+        </CodeBlock>
+      </Section>
+
+      <Section title="WebUSB Integration" icon={Code}>
+        <p>Your existing web application should work with this firmware. Here's how the connection works:</p>
+        
+        <div className="space-y-4">
+          <div>
+            <h4 className="font-semibold text-gray-200">USB Device Identification</h4>
+            <p className="text-sm">
+              The ESP32-S3 will appear with VID: <code>0x303A</code> (Espressif) and PID: <code>0x8166</code>.
+              Enter these values in the ConnectionManager on the Oscilloscope page.
+            </p>
+          </div>
+          
+          <div>
+            <h4 className="font-semibold text-gray-200">Data Format</h4>
+            <p className="text-sm">
+              The firmware sends 64 bytes per packet at ~64ms intervals (1kHz effective sample rate).
+              Each byte represents an 8-bit ADC value (0-255) that gets converted to voltage (0-3.3V) by the web app.
+            </p>
+          </div>
+          
+          <div>
+            <h4 className="font-semibold text-gray-200">Connection Process</h4>
+            <ol className="text-sm list-decimal list-inside space-y-1">
+              <li>Flash the firmware to your ESP32-S3</li>
+              <li>Connect the ESP32-S3 via USB to your computer</li>
+              <li>Open the web application in Chrome/Edge</li>
+              <li>Enter VID: 303A, PID: 8166 in the connection manager</li>
+              <li>Click "Connect to Miniscope" and select the ESP32-S3 device</li>
+              <li>Set Sample Rate to 1000 in the controls panel</li>
+              <li>Click "Run" to start data acquisition</li>
+            </ol>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Flashing Instructions" icon={Download}>
+        <div className="space-y-4">
+          <div>
+            <h4 className="font-semibold text-gray-200">Using PlatformIO</h4>
+            <CodeBlock title="Terminal Commands">
+{`# Install PlatformIO if not already installed
+pip install platformio
+
+# Create new project (or copy the files above into existing project)
+pio project init --board esp32-s3-devkitc-1
+
+# Build the project
+pio run
+
+# Flash to ESP32-S3 (make sure it's connected and in download mode)
+pio run --target upload
+
+# Monitor serial output
+pio device monitor`}
+            </CodeBlock>
+          </div>
+          
+          <div>
+            <h4 className="font-semibold text-gray-200">Using Arduino IDE</h4>
+            <ol className="text-sm list-decimal list-inside space-y-1">
+              <li>Install ESP32 board package in Arduino IDE</li>
+              <li>Install "Adafruit TinyUSB Library" from Library Manager</li>
+              <li>Select "ESP32S3 Dev Module" as board</li>
+              <li>Set "USB Mode" to "Hardware CDC and JTAG"</li>
+              <li>Set "USB CDC On Boot" to "Enabled"</li>
+              <li>Copy all the code files into Arduino project</li>
+              <li>Compile and upload</li>
+            </ol>
+          </div>
+        </div>
+      </Section>
+
+      <Alert className="bg-green-900/30 border-green-700 text-green-200">
+        <Zap className="h-4 w-4 !text-green-400" />
+        <AlertTitle className="text-green-300">Expected Results</AlertTitle>
+        <AlertDescription>
+          <ul className="list-disc list-inside space-y-1 mt-2">
+            <li><strong>Transfer Rate:</strong> ~1000 bytes/second (1kHz × 1 byte per sample)</li>
+            <li><strong>Waveform:</strong> Mixed signal with sine wave (50Hz), square wave (25Hz), and noise</li>
+            <li><strong>USB Latency:</strong> ~64ms packet intervals for smooth data flow</li>
+            <li><strong>Serial Debug:</strong> Connection status and statistics every 5 seconds</li>
+          </ul>
+        </AlertDescription>
+      </Alert>
+    </div>
+  );
+}

@@ -1,0 +1,135 @@
+import React from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Play, Pause, ArrowDownUp, Clock, TrendingUp, Aperture } from 'lucide-react';
+
+const voltsPerDivOptions = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5];
+const timePerDivOptions = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500]; // in ms
+
+const ControlSection = ({ title, icon, children }) => (
+  <Card className="bg-gray-800 border-gray-700">
+    <CardHeader className="pb-3 pt-4 px-4">
+      <CardTitle className="text-md font-semibold text-gray-200 flex items-center">
+        {React.createElement(icon, { className: "w-5 h-5 mr-2 text-cyan-400"})}
+        {title}
+      </CardTitle>
+    </CardHeader>
+    <CardContent className="px-4 pb-4 space-y-3">
+      {children}
+    </CardContent>
+  </Card>
+);
+
+export default function ControlsPanel({ settings, onSettingChange, onToggleAcquisition, isAcquiring }) {
+  const handleInputChange = (key, value, isNumber = true) => {
+    onSettingChange(key, isNumber ? parseFloat(value) : value);
+  };
+
+  const handleSelectChange = (key, value) => {
+    onSettingChange(key, value);
+  };
+  
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <ControlSection title="Acquisition" icon={Aperture}>
+        <Button onClick={onToggleAcquisition} className="w-full bg-green-500 hover:bg-green-600 data-[state=paused]:bg-yellow-500 data-[state=paused]:hover:bg-yellow-600" data-state={isAcquiring ? 'running' : 'paused'}>
+          {isAcquiring ? <Pause className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
+          {isAcquiring ? 'Stop' : 'Run'}
+        </Button>
+        <div className="space-y-1">
+          <Label htmlFor="sampleRate" className="text-xs text-gray-400">Sample Rate (Sa/s)</Label>
+          <Input 
+            id="sampleRate" 
+            type="number" 
+            value={settings.sampleRate} 
+            onChange={(e) => handleInputChange('sampleRate', e.target.value)}
+            className="bg-gray-700 border-gray-600 text-gray-100 h-8 text-sm"
+          />
+        </div>
+      </ControlSection>
+
+      <ControlSection title="Vertical" icon={ArrowDownUp}>
+        <div className="space-y-1">
+          <Label htmlFor="voltsPerDiv" className="text-xs text-gray-400">Volts/Div</Label>
+          <Select value={settings.voltsPerDiv.toString()} onValueChange={(val) => handleInputChange('voltsPerDiv', val)}>
+            <SelectTrigger className="w-full bg-gray-700 border-gray-600 text-gray-100 h-8 text-sm">
+              <SelectValue placeholder="Volts/Div" />
+            </SelectTrigger>
+            <SelectContent className="bg-gray-700 border-gray-600 text-gray-100">
+              {voltsPerDivOptions.map(v => <SelectItem key={v} value={v.toString()}>{v} V</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="verticalOffset" className="text-xs text-gray-400">Offset (V)</Label>
+          <Input 
+            id="verticalOffset" 
+            type="number" 
+            step="0.1" 
+            value={settings.verticalOffset} 
+            onChange={(e) => handleInputChange('verticalOffset', e.target.value)}
+            className="bg-gray-700 border-gray-600 text-gray-100 h-8 text-sm"
+          />
+        </div>
+      </ControlSection>
+
+      <ControlSection title="Horizontal" icon={Clock}>
+        <div className="space-y-1">
+          <Label htmlFor="timePerDiv" className="text-xs text-gray-400">Time/Div</Label>
+          <Select value={settings.timePerDiv.toString()} onValueChange={(val) => handleInputChange('timePerDiv', val)}>
+            <SelectTrigger className="w-full bg-gray-700 border-gray-600 text-gray-100 h-8 text-sm">
+              <SelectValue placeholder="Time/Div" />
+            </SelectTrigger>
+            <SelectContent className="bg-gray-700 border-gray-600 text-gray-100">
+              {timePerDivOptions.map(t => <SelectItem key={t} value={t.toString()}>{t} ms</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+         {/* Horizontal position might be added later */}
+      </ControlSection>
+
+      <ControlSection title="Trigger" icon={TrendingUp}>
+        <div className="space-y-1">
+          <Label htmlFor="triggerMode" className="text-xs text-gray-400">Mode</Label>
+          <Select value={settings.triggerMode} onValueChange={(val) => handleSelectChange('triggerMode', val)}>
+            <SelectTrigger className="w-full bg-gray-700 border-gray-600 text-gray-100 h-8 text-sm">
+              <SelectValue placeholder="Mode" />
+            </SelectTrigger>
+            <SelectContent className="bg-gray-700 border-gray-600 text-gray-100">
+              <SelectItem value="auto">Auto</SelectItem>
+              <SelectItem value="normal">Normal</SelectItem>
+              <SelectItem value="single">Single</SelectItem>
+              <SelectItem value="off">Off (Roll)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="triggerLevel" className="text-xs text-gray-400">Level (V)</Label>
+          <Input 
+            id="triggerLevel" 
+            type="number" 
+            step="0.05" 
+            value={settings.triggerLevel} 
+            onChange={(e) => handleInputChange('triggerLevel', e.target.value)}
+            className="bg-gray-700 border-gray-600 text-gray-100 h-8 text-sm"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="triggerEdge" className="text-xs text-gray-400">Edge</Label>
+          <Select value={settings.triggerEdge} onValueChange={(val) => handleSelectChange('triggerEdge', val)}>
+            <SelectTrigger className="w-full bg-gray-700 border-gray-600 text-gray-100 h-8 text-sm">
+              <SelectValue placeholder="Edge" />
+            </SelectTrigger>
+            <SelectContent className="bg-gray-700 border-gray-600 text-gray-100">
+              <SelectItem value="rising">Rising</SelectItem>
+              <SelectItem value="falling">Falling</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </ControlSection>
+    </div>
+  );
+}

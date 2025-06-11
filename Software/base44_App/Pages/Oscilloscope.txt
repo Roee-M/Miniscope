@@ -1,0 +1,391 @@
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ConnectionManager from '@/components/oscilloscope/ConnectionManager';
+import ScopeDisplay from '@/components/oscilloscope/ScopeDisplay';
+import ControlsPanel from '@/components/oscilloscope/ControlsPanel';
+import SerialMonitor from '@/components/oscilloscope/SerialMonitor';
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Info } from "lucide-react";
+import { Link } from 'react-router-dom'; // Assuming you are using React Router
+
+// Hardware configuration constants
+const ADC_REFERENCE_VOLTAGE = 3.3; // ESP32 ADC reference voltage in volts
+const ADC_RESOLUTION_BITS = 8;     // Assuming 8-bit ADC data (0-255)
+const ADC_MAX_VALUE = (1 << ADC_RESOLUTION_BITS) - 1; // 255 for 8-bit
+
+// Data acquisition settings
+const SAMPLES_TO_DISPLAY = 1024;   // Number of samples to keep in display buffer
+const USB_READ_BUFFER_SIZE = 64;   // Bytes to read per USB transfer
+
+/**
+ * Main Oscilloscope Page Component
+ * 
+ * Manages the complete oscilloscope interface including:
+ * - USB device connection via ConnectionManager
+ * - Real-time data acquisition and display via ScopeDisplay  
+ * - User controls via ControlsPanel
+ * - Raw data monitoring via SerialMonitor
+ * - Data processing from raw ADC values to voltage
+ */
+export default function OscilloscopePage() {
+  // ========== CONNECTION STATE ==========
+  const [isDeviceConnected, setIsDeviceConnected] = useState(false);
+  const [connectedDevice, setConnectedDevice] = useState(null);
+  const [deviceEndpoints, setDeviceEndpoints] = useState({ 
+    interfaceNumber: -1, 
+    endpointInNumber: -1, 
+    endpointOutNumber: -1 
+  });
+  const [connectionError, setConnectionError] = useState(null);
+  
+  // ========== OSCILLOSCOPE SETTINGS ==========
+  const [scopeSettings, setScopeSettings] = useState({
+    voltsPerDiv: 0.5,           // Volts per division on Y-axis
+    timePerDiv: 10,             // Milliseconds per division on X-axis  
+    verticalOffset: ADC_REFERENCE_VOLTAGE / 2,  // Y-axis center offset
+    triggerLevel: ADC_REFERENCE_VOLTAGE / 2,    // Trigger voltage level
+    triggerEdge: 'rising',      // Trigger on rising or falling edge
+    triggerMode: 'auto',        // auto/normal/single/off
+    sampleRate: 10000,          // Samples per second (Hz)
+  });
+
+  // ========== DATA ACQUISITION STATE ==========
+  const [isAcquiringData, setIsAcquiringData] = useState(false);
+  const [scopeDataPoints, setScopeDataPoints] = useState([]);
+  
+  // ========== REFS FOR DATA ACQUISITION LOOP ==========
+  const timeCounterRef = useRef(0);          // Running time counter in milliseconds
+  const acquisitionLoopRef = useRef(null);   // requestAnimationFrame ID
+  const shouldKeepReadingRef = useRef(false); // Flag to control read loop
+
+  // ========== DERIVED VALUES ==========
+  // Calculate time between samples based on sample rate
+  const samplesPerMillisecond = scopeSettings.sampleRate > 0 ? scopeSettings.sampleRate / 1000 : 0;
+  const millisecondsPerSample = samplesPerMillisecond > 0 ? 1 / samplesPerMillisecond : 0;
+
+  /**
+   * Updates a single oscilloscope setting
+   * Used by ControlsPanel to modify settings
+   */
+  const updateScopeSetting = useCallback((settingKey, newValue) => {
+    setScopeSettings(previousSettings => ({ 
+      ...previousSettings, 
+      [settingKey]: newValue 
+    }));
+  }, []);
+
+  /**
+   * Stops data acquisition process
+   * Cancels the read loop and updates UI state
+   */
+  const stopDataAcquisition = useCallback(() => {
+    console.log("[Oscilloscope] Stopping data acquisition...");
+    setIsAcquiringData(false);
+    shouldKeepReadingRef.current = false;
+    
+    if (acquisitionLoopRef.current) {
+      cancelAnimationFrame(acquisitionLoopRef.current);
+      acquisitionLoopRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Handles device disconnection
+   * Stops acquisition, releases USB interface, and resets state
+   */
+  const handleDeviceDisconnection = useCallback(async () => {
+    console.log("[Oscilloscope] Starting device disconnection process...");
+    
+    // Stop any ongoing data acquisition
+    stopDataAcquisition();
+    
+    // Release USB resources if device is still available
+    if (connectedDevice) {
+      try {
+        // Release claimed interface
+        if (connectedDevice.opened && deviceEndpoints.interfaceNumber !== -1) {
+          console.log(`[Oscilloscope] Releasing USB interface ${deviceEndpoints.interfaceNumber}...`);
+          await connectedDevice.releaseInterface(deviceEndpoints.interfaceNumber)
+            .catch(error => console.warn("[Oscilloscope] Error releasing interface:", error));
+        }
+        
+        // Close device connection
+        if (connectedDevice.opened) {
+          console.log("[Oscilloscope] Closing USB device...");
+          await connectedDevice.close()
+            .catch(error => console.warn("[Oscilloscope] Error closing device:", error));
+        }
+      } catch (error) {
+        console.warn("[Oscilloscope] Error during disconnection:", error);
+      }
+    }
+    
+    // Reset all connection-related state
+    setConnectedDevice(null);
+    setDeviceEndpoints({ interfaceNumber: -1, endpointInNumber: -1, endpointOutNumber: -1 });
+    setIsDeviceConnected(false);
+    setScopeDataPoints([]);
+    setConnectionError(null);
+    
+    console.log("[Oscilloscope] Device disconnection completed");
+  }, [connectedDevice, deviceEndpoints, stopDataAcquisition]);
+
+  /**
+   * Processes raw USB data and converts to voltage measurements
+   * Adds timing information and updates the display buffer
+   */
+  const processIncomingDataChunk = useCallback((rawByteArray) => {
+    // Validate sample rate before processing
+    if (millisecondsPerSample <= 0) {
+      console.warn("[Oscilloscope] Invalid sample rate, cannot process data");
+      setConnectionError("Sample rate must be greater than 0. Please check settings.");
+      stopDataAcquisition();
+      return;
+    }
+    
+    const newDataPoints = [];
+    
+    // Convert each byte to voltage and add timing
+    for (let byteIndex = 0; byteIndex < rawByteArray.length; byteIndex++) {
+      const rawAdcValue = rawByteArray[byteIndex];
+      
+      // Convert ADC value to voltage: (raw / max_value) * reference_voltage
+      const voltageValue = (rawAdcValue / ADC_MAX_VALUE) * ADC_REFERENCE_VOLTAGE;
+      
+      // Create data point with timestamp
+      newDataPoints.push({ 
+        time: timeCounterRef.current, 
+        voltage: voltageValue 
+      });
+      
+      // Advance time counter
+      timeCounterRef.current += millisecondsPerSample;
+    }
+    
+    // Update display buffer, keeping only the most recent samples
+    setScopeDataPoints(previousPoints => {
+      const combinedPoints = [...previousPoints, ...newDataPoints];
+      return combinedPoints.slice(Math.max(0, combinedPoints.length - SAMPLES_TO_DISPLAY));
+    });
+  }, [millisecondsPerSample, stopDataAcquisition]);
+
+  /**
+   * Main USB data reading loop
+   * Continuously reads data from USB device and processes it
+   * Runs as a requestAnimationFrame loop for smooth performance
+   */
+  const usbDataReadingLoop = useCallback(async () => {
+    // Check if we should continue reading
+    if (!connectedDevice || !shouldKeepReadingRef.current || deviceEndpoints.endpointInNumber === -1) {
+      return;
+    }
+
+    try {
+      // Ensure device is still open and ready
+      if (!connectedDevice.opened) {
+        console.warn("[Oscilloscope] Device connection lost, attempting to reopen...");
+        await connectedDevice.open();
+        if (connectedDevice.configuration === null) {
+          await connectedDevice.selectConfiguration(1);
+        }
+        await connectedDevice.claimInterface(deviceEndpoints.interfaceNumber);
+        console.log("[Oscilloscope] Device connection restored");
+      }
+
+      // Read data from USB device
+      const transferResult = await connectedDevice.transferIn(
+        deviceEndpoints.endpointInNumber, 
+        USB_READ_BUFFER_SIZE
+      );
+      
+      // Process successful data transfers
+      if (transferResult.status === 'ok' && transferResult.data && transferResult.data.byteLength > 0) {
+        const receivedBytes = new Uint8Array(transferResult.data.buffer);
+        processIncomingDataChunk(receivedBytes);
+      } 
+      // Handle USB endpoint stall condition
+      else if (transferResult.status === 'stall') {
+        console.warn(`[Oscilloscope] USB endpoint ${deviceEndpoints.endpointInNumber} stalled, clearing...`);
+        await connectedDevice.clearHalt('in', deviceEndpoints.endpointInNumber);
+      } 
+      // Handle USB babble condition (data corruption)
+      else if (transferResult.status === 'babble') {
+        console.warn(`[Oscilloscope] USB endpoint babbled - check ESP32 firmware and buffer sizes`);
+      }
+      
+    } catch (error) {
+      console.error('[Oscilloscope] USB read error:', error);
+      
+      // Handle device disconnection errors
+      if (error.message.includes("disconnected") || 
+          error.message.includes("No such device") || 
+          error.message.includes("The device was disconnected")) {
+        setConnectionError("Device disconnected during operation. Please reconnect.");
+        handleDeviceDisconnection();
+      } else {
+        setConnectionError(`USB read error: ${error.message}. Try reconnecting the device.`);
+        stopDataAcquisition();
+      }
+      return;
+    }
+
+    // Continue the reading loop if still active
+    if (shouldKeepReadingRef.current) {
+      acquisitionLoopRef.current = requestAnimationFrame(usbDataReadingLoop);
+    }
+  }, [connectedDevice, deviceEndpoints, processIncomingDataChunk, handleDeviceDisconnection, stopDataAcquisition]);
+
+  /**
+   * Starts the data acquisition process
+   * Validates settings and begins the USB reading loop
+   */
+  const startDataAcquisition = useCallback(() => {
+    // Validate connection state
+    if (!connectedDevice || !isDeviceConnected || deviceEndpoints.endpointInNumber === -1) {
+      setConnectionError("Cannot start acquisition: Device not connected or USB endpoint not available.");
+      return;
+    }
+    
+    // Validate sample rate setting
+    if (scopeSettings.sampleRate <= 0) {
+      setConnectionError("Sample Rate must be greater than 0. Please set it in the Controls panel.");
+      return;
+    }
+    
+    // Clear any previous errors and start acquisition
+    setConnectionError(null);
+    console.log("[Oscilloscope] Starting data acquisition...");
+    setIsAcquiringData(true);
+    shouldKeepReadingRef.current = true;
+    
+    // Reset timing and data
+    timeCounterRef.current = 0;
+    setScopeDataPoints([]);
+    
+    // Start the USB reading loop
+    acquisitionLoopRef.current = requestAnimationFrame(usbDataReadingLoop);
+  }, [connectedDevice, isDeviceConnected, deviceEndpoints, scopeSettings.sampleRate, usbDataReadingLoop]);
+
+  /**
+   * Toggles data acquisition on/off
+   * Used by the Run/Stop button in ControlsPanel
+   */
+  const toggleDataAcquisition = useCallback(() => {
+    if (isAcquiringData) {
+      stopDataAcquisition();
+    } else {
+      startDataAcquisition();
+    }
+  }, [isAcquiringData, startDataAcquisition, stopDataAcquisition]);
+
+  /**
+   * Handles successful device connection from ConnectionManager
+   * Updates state with connected device and endpoint information
+   */
+  const handleDeviceConnection = useCallback(async (device, error, endpoints) => {
+    if (error) {
+      console.error("[Oscilloscope] Connection failed:", error);
+      setConnectionError(error);
+      setIsDeviceConnected(false);
+      setConnectedDevice(null);
+      setDeviceEndpoints({ interfaceNumber: -1, endpointInNumber: -1, endpointOutNumber: -1 });
+      return;
+    }
+    
+    if (device && endpoints) {
+      console.log("[Oscilloscope] Device connected successfully:", {
+        productName: device.productName || "Unknown Device",
+        interfaceNumber: endpoints.interfaceNumber,
+        endpointIn: endpoints.endpointInNumber,
+        endpointOut: endpoints.endpointOutNumber
+      });
+      
+      setConnectedDevice(device);
+      setDeviceEndpoints(endpoints);
+      setIsDeviceConnected(true);
+      setConnectionError(null);
+    }
+  }, []);
+
+  /**
+   * Cleanup effect: Disconnect device when component unmounts
+   */
+  useEffect(() => {
+    const disconnectHandler = handleDeviceDisconnection;
+    const currentDevice = connectedDevice;
+    const currentConnectionState = isDeviceConnected;
+
+    return () => {
+      if (currentConnectionState || currentDevice) {
+        console.log("[Oscilloscope] Component unmounting, cleaning up connection...");
+        disconnectHandler();
+      }
+    };
+  }, [isDeviceConnected, connectedDevice, handleDeviceDisconnection]);
+
+  // Function to create the URL for a page (replace with your actual routing logic)
+  const createPageUrl = (pageName) => {
+      return `/${pageName.toLowerCase()}`; // Example: /documentation
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Device Connection Management */}
+      <ConnectionManager 
+        onConnect={handleDeviceConnection}
+        onDisconnect={handleDeviceDisconnection}
+        isConnected={isDeviceConnected}
+        connectionError={connectionError}
+      />
+
+      {/* Success message when connected */}
+      {isDeviceConnected && !connectionError && (
+        <Alert variant="default" className="bg-gray-800 border-cyan-500 text-cyan-100">
+          <Info className="h-4 w-4 !text-cyan-400" />
+          <AlertTitle className="text-cyan-300">Miniscope Connected Successfully!</AlertTitle>
+          <AlertDescription>
+            Device is ready for data acquisition. Make sure the 'Sample Rate' in controls matches 
+            your ESP32's firmware configuration for accurate timing. Click 'Run' to start capturing data.
+            Consult the <Link to={createPageUrl('Documentation')} className="underline hover:text-cyan-300">Documentation</Link> for firmware setup details.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Oscilloscope Display */}
+      <ScopeDisplay 
+        dataPoints={scopeDataPoints}
+        voltsPerDiv={scopeSettings.voltsPerDiv}
+        timePerDiv={scopeSettings.timePerDiv}
+        verticalOffset={scopeSettings.verticalOffset}
+        triggerLevel={scopeSettings.triggerMode !== 'off' ? scopeSettings.triggerLevel : null}
+        sampleRate={scopeSettings.sampleRate}
+      />
+
+      {/* Control Panel */}
+      <ControlsPanel 
+        settings={scopeSettings}
+        onSettingChange={updateScopeSetting}
+        onToggleAcquisition={toggleDataAcquisition}
+        isAcquiring={isAcquiringData}
+      />
+
+      {/* Serial Monitor for Raw Data */}
+      <SerialMonitor 
+        device={connectedDevice}
+        deviceEndpoints={deviceEndpoints}
+        isConnected={isDeviceConnected}
+      />
+      
+      {/* Technical Documentation section removed, now on Documentation page */}
+      {/* A small note pointing to documentation can be useful */}
+       <div className="p-4 bg-gray-800 rounded-lg shadow-md text-center">
+        <p className="text-sm text-gray-400">
+          For detailed firmware requirements and development guidelines, please see the {' '}
+          <Link to={createPageUrl('Documentation')} className="text-cyan-400 hover:underline">
+            Documentation Page
+          </Link>.
+        </p>
+      </div>
+    </div>
+  );
+}

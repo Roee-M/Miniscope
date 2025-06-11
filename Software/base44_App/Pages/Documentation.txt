@@ -1,0 +1,174 @@
+import React from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Terminal, Layers, Cpu, GitFork, BookOpen, ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { createPageUrl } from '@/utils';
+
+const Section = ({ title, icon, children }) => (
+  <Card className="bg-gray-800 border-gray-700 shadow-md">
+    <CardHeader>
+      <CardTitle className="text-xl text-gray-100 flex items-center">
+        {React.createElement(icon, { className: "w-6 h-6 mr-3 text-cyan-400"})}
+        {title}
+      </CardTitle>
+    </CardHeader>
+    <CardContent className="text-gray-300 space-y-3">
+      {children}
+    </CardContent>
+  </Card>
+);
+
+const FileLink = ({ path, children }) => (
+    // Note: Direct linking to local files for editing is not possible from a web browser for security reasons.
+    // This simply displays the path.
+    <span className="font-mono bg-gray-700 px-1 py-0.5 rounded text-sm text-amber-400">{path}</span>
+);
+
+export default function DocumentationPage() {
+  return (
+    <div className="space-y-8 max-w-4xl mx-auto">
+      <header className="text-center py-6">
+        <h1 className="text-4xl font-bold text-gray-100">Miniscope Developer Documentation</h1>
+        <p className="text-lg text-gray-400 mt-2">
+          A guide to understanding, modifying, and extending the ESP32 Miniscope web application.
+        </p>
+      </header>
+
+      <Section title="Project Overview" icon={BookOpen}>
+        <p>
+          This application provides a web-based interface for an ESP32-powered DIY oscilloscope. 
+          It uses WebUSB to communicate directly with the ESP32, allowing for real-time data acquisition and visualization.
+        </p>
+        <Alert variant="info" className="bg-sky-900/50 border-sky-700 text-sky-200">
+          <Layers className="h-4 w-4 !text-sky-400" />
+          <AlertTitle className="text-sky-300">WebUSB Technology</AlertTitle>
+          <AlertDescription>
+            WebUSB allows web pages to interact with USB devices. This requires a compatible browser (Chrome, Edge, Opera) and user permission.
+            Firefox and Safari do not support WebUSB.
+          </AlertDescription>
+        </Alert>
+      </Section>
+
+      <Section title="ESP32 Firmware Requirements" icon={Cpu}>
+        <p>For the web application to connect and receive data, your ESP32 firmware must:</p>
+        <ul className="list-disc list-inside space-y-2 pl-4">
+          <li>
+            <strong>Implement USB CDC (Communication Device Class):</strong> The ESP32 should appear as a generic serial device over USB.
+            Specifically, it must expose a CDC Data Class Interface (Interface Class <code>0x0A</code>) with at least one Bulk IN endpoint.
+            A Bulk OUT endpoint is optional for sending commands from the web app to the ESP32.
+          </li>
+          <li>
+            <strong>Data Format:</strong> Send data as raw <code>uint8_t</code> arrays. Each byte represents an ADC reading (0-255).
+            The web application assumes an 8-bit ADC resolution.
+          </li>
+          <li>
+            <strong>ADC Configuration:</strong> The web app uses these constants (modifiable in <FileLink path="pages/Oscilloscope.js" />):
+            <ul className="list-circle list-inside ml-4 mt-1 space-y-1 text-sm">
+                <li><code>ADC_REFERENCE_VOLTAGE = 3.3V</code></li>
+                <li><code>ADC_RESOLUTION_BITS = 8</code> (implies max value of 255)</li>
+            </ul>
+            Ensure your firmware's ADC setup aligns with these or update them in the web app.
+          </li>
+          <li>
+            <strong>Sample Rate:</strong> The firmware determines the actual sample rate. The "Sample Rate" setting in the web app's control panel must be set to match the firmware's rate for correct time-axis scaling. The firmware continuously sends data packets.
+          </li>
+          <li>
+            <strong>USB Packet Size:</strong> The web app reads data in chunks of <code>USB_READ_BUFFER_SIZE</code> (default 64 bytes). Firmware can send packets of this size or smaller.
+          </li>
+        </ul>
+        <Alert variant="warning" className="bg-amber-900/50 border-amber-700 text-amber-200">
+          <Terminal className="h-4 w-4 !text-amber-400" />
+          <AlertTitle className="text-amber-300">Debugging Tip</AlertTitle>
+          <AlertDescription>
+            Use the "Serial Monitor" component on the Oscilloscope page to verify raw data transmission from your ESP32.
+            This is crucial for troubleshooting connection or data issues.
+          </AlertDescription>
+        </Alert>
+      </Section>
+
+      <Section title="Code Structure & Modifying Files" icon={GitFork}>
+        <p>The application is built with React and Tailwind CSS. Here's a breakdown of key files:</p>
+        <div className="space-y-4">
+          <div>
+            <h4 className="font-semibold text-gray-200">Core Page: <FileLink path="pages/Oscilloscope.js" /></h4>
+            <p className="text-sm">
+              This is the main page of the application. It orchestrates all components.
+              <strong>Editing:</strong> Modify this file for overall layout changes on the scope page, managing shared state between components, or changing fundamental data acquisition parameters (like <code>ADC_REFERENCE_VOLTAGE</code>, <code>SAMPLES_TO_DISPLAY</code>).
+            </p>
+          </div>
+          <div>
+            <h4 className="font-semibold text-gray-200">USB Connection: <FileLink path="components/oscilloscope/ConnectionManager.js" /></h4>
+            <p className="text-sm">
+              Handles all WebUSB interactions: device discovery, selection, opening/closing connection, interface claiming, and VID/PID management.
+              <strong>Editing:</strong> Modify this if you need to change how USB devices are filtered, how interfaces are selected (<code>findSuitableInterface</code> function), or to customize error handling for USB connections. The "Unable to claim interface" error is often related to logic in <code>findSuitableInterface</code> or external factors.
+            </p>
+          </div>
+          <div>
+            <h4 className="font-semibold text-gray-200">Waveform Display: <FileLink path="components/oscilloscope/ScopeDisplay.js" /></h4>
+            <p className="text-sm">
+              Renders the oscilloscope waveform using the Recharts library.
+              <strong>Editing:</strong> Change this file to customize the appearance of the graph (colors, grid, axes), add new display features (e.g., cursors, measurements), or to switch to a different charting library.
+            </p>
+          </div>
+          <div>
+            <h4 className="font-semibold text-gray-200">Controls: <FileLink path="components/oscilloscope/ControlsPanel.js" /></h4>
+            <p className="text-sm">
+              Provides UI elements (buttons, sliders, dropdowns) for adjusting oscilloscope settings like Volts/Div, Time/Div, Trigger, etc.
+              <strong>Editing:</strong> Modify this to add new controls, change the range of existing controls, or alter the layout of the control panel.
+            </p>
+          </div>
+          <div>
+            <h4 className="font-semibold text-gray-200">Serial Debug: <FileLink path="components/oscilloscope/SerialMonitor.js" /></h4>
+            <p className="text-sm">
+              Displays raw data from the USB device and allows sending commands (if an OUT endpoint is available). Useful for debugging.
+              <strong>Editing:</strong> Change this to alter how serial data is displayed, add new formatting options, or improve command sending features.
+            </p>
+          </div>
+          <div>
+            <h4 className="font-semibold text-gray-200">Overall Layout: <FileLink path="Layout.js" /></h4>
+            <p className="text-sm">
+              Defines the main structure of the application (header, navigation, footer) that wraps around all pages.
+              <strong>Editing:</strong> Modify this to change the global navigation, application title, or overall theme.
+            </p>
+          </div>
+          <div>
+            <h4 className="font-semibold text-gray-200">This Page: <FileLink path="pages/Documentation.js" /></h4>
+            <p className="text-sm">
+              The page you are currently viewing.
+              <strong>Editing:</strong> Update this file to improve documentation content.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Dependencies" icon={Layers}>
+        <p>This project primarily uses:</p>
+        <ul className="list-disc list-inside space-y-1 pl-4">
+          <li><strong>React:</strong> For building the user interface.</li>
+          <li><strong>Tailwind CSS:</strong> For styling. (via shadcn/ui)</li>
+          <li><strong>shadcn/ui:</strong> Pre-built UI components. <a href="https://ui.shadcn.com/" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">Visit shadcn/ui <ExternalLink className="inline h-4 w-4"/></a></li>
+          <li><strong>Lucide React:</strong> For icons. <a href="https://lucide.dev/" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">Visit Lucide <ExternalLink className="inline h-4 w-4"/></a></li>
+          <li><strong>Recharts:</strong> For drawing the oscilloscope graph. <a href="https://recharts.org/" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">Visit Recharts <ExternalLink className="inline h-4 w-4"/></a></li>
+        </ul>
+        <p className="mt-2 text-sm">
+          These are managed by the base44 platform. You typically don't need to install them manually when developing within the platform.
+        </p>
+      </Section>
+      
+      <Section title="Troubleshooting 'Unable to claim interface'" icon={Terminal}>
+        <p>This is a common and frustrating WebUSB error. If you encounter it:</p>
+        <ol className="list-decimal list-inside space-y-2 pl-4">
+          <li><strong>Close Conflicting Apps:</strong> Ensure no other software (Arduino IDE, PlatformIO serial monitor, other terminal programs, ESP flashing tools) is connected to the ESP32.</li>
+          <li><strong>Check System Drivers (Windows):</strong> Sometimes, a generic driver like WinUSB or libusb-win32 might automatically claim the interface. You might need to use Zadig tool to assign the "USB Composite Device" or "USB Serial (CDC)" driver to the interface if another driver has claimed it. This is advanced and platform-specific.</li>
+          <li><strong>Reconnect Device:</strong> Unplug and replug the ESP32. Try a different USB port and cable.</li>
+          <li><strong>Restart Browser/Computer:</strong> Sometimes this helps clear stale locks on the USB device.</li>
+          <li><strong>Inspect Console Logs:</strong> Open your browser's developer console (usually F12). The `ConnectionManager.js` now logs detailed information about detected USB interfaces and endpoints. This can help identify if the wrong interface is being selected. Look for messages like "[ConnectionManager] Inspecting Interface Number..." and "[ConnectionManager] Selected PREFERRED/FALLBACK...".</li>
+          <li><strong>Firmware Check:</strong> Double-check that your ESP32 firmware is correctly setting up the USB CDC interface and that it's not exposing multiple conflicting interfaces (e.g., JTAG and CDC on the same physical port without proper multiplexing detectable by WebUSB). Ensure the CDC Data interface (Class 0x0A) is present.</li>
+          <li><strong>Browser Permissions:</strong> Ensure you've granted the website permission to access the USB device when prompted.</li>
+        </ol>
+      </Section>
+
+    </div>
+  );
+}
