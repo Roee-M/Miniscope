@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>MiniScope</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    canvas { max-width: 100%; height: auto; }
+    button { margin: 10px; padding: 10px 20px; }
+    #status { margin-top: 10px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>MiniScope</h1>
+  <button onclick="connect()">Connect</button>
+  <button onclick="start()">Start</button>
+  <button onclick="stop()">Stop</button>
+  <div id="status">Status: Not connected</div>
+  <canvas id="chart"></canvas>
+
+  <script>
+    let port, reader;
+    let running = false;
+    let chart, data = [], labels = [], time = 0;
+    const BATCH_SIZE = 50;   // Number of samples per update
+    const UPDATE_DELAY = 100; // Delay between updates (ms)
+
+    window.onload = () => {
+      const ctx = document.getElementById('chart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Voltage (0–4095)',
+            data: data,
+            borderColor: 'red',
+            borderWidth: 1,
+            pointRadius: 2,
+          }]
+        },
+        options: {
+          animation: false,
+          scales: {
+            y: {
+              suggestedMin: 0,
+              suggestedMax: 4095
+            }
+          }
+        }
+      });
+    };
+
+    async function connect() {
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      document.getElementById("status").innerText = "Status: Connected";
+    }
+
+    async function start() {
+      if (!port) return;
+
+      const writer = port.writable.getWriter();
+      await writer.write(new TextEncoder().encode('S'));  // Start command
+      writer.releaseLock();
+
+      running = true;
+      document.getElementById("status").innerText = "Status: Running";
+      reader = port.readable.getReader();
+      listenBuffered();
+    }
+
+    async function stop() {
+      running = false;
+      if (reader) {
+        await reader.cancel();
+        reader.releaseLock();
+        reader = null;
+      }
+      document.getElementById("status").innerText = "Status: Stopped";
+    }
+
+    async function listenBuffered() {
+      let rawBuffer = [];
+
+      while (running && reader) {
+        try {
+          const { value, done } = await reader.read();
+          if (done || !value) break;
+
+          for (let byte of value) {
+            rawBuffer.push(byte);
+
+            if (rawBuffer.length >= BATCH_SIZE * 2) {
+              // Process buffered data
+              for (let i = 0; i < rawBuffer.length; i += 2) {
+                let sample = rawBuffer[i] | (rawBuffer[i + 1] << 8);
+                data.push(sample);
+                labels.push(time++);
+              }
+
+              // Trim buffer and chart to last 200 samples
+              rawBuffer = [];
+              if (data.length > 200) {
+                data.splice(0, data.length - 200);
+                labels.splice(0, labels.length - 200);
+              }
+
+              chart.update();
+
+              // Wait a short time before continuing
+              await new Promise(resolve => setTimeout(resolve, UPDATE_DELAY));
+            }
+          }
+        } catch (err) {
+          console.error("Read error:", err);
+          document.getElementById("status").innerText = "Status: Error";
+          break;
+        }
+      }
+    }
+  </script>
+</body>
+</html>
