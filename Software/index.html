@@ -1,122 +1,142 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>MiniScope</title>
+  <title>MiniScope Triggered Capture</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    canvas { max-width: 100%; height: auto; }
+    canvas { max-width: 100%; height: 300px; }
     button { margin: 10px; padding: 10px 20px; }
     #status { margin-top: 10px; font-weight: bold; }
   </style>
 </head>
 <body>
-  <h1>MiniScope</h1>
+  <h1>MiniScope Triggered Capture (Mock Clock)</h1>
   <button onclick="connect()">Connect</button>
-  <button onclick="start()">Start</button>
-  <button onclick="stop()">Stop</button>
-  <div id="status">Status: Not connected</div>
+  <button onclick="startCapture()">Start</button>
+  <button onclick="stopCapture()">Stop</button>
+  <div id="status">Status: Disconnected</div>
   <canvas id="chart"></canvas>
 
   <script>
-    let port, reader;
+    let port, reader, writer;
     let running = false;
-    let chart, data = [], labels = [], time = 0;
-    const BATCH_SIZE = 50;   // Number of samples per update
-    const UPDATE_DELAY = 100; // Delay between updates (ms)
+    const BUFFER_SIZE = 1024;   // Must match ESP32 buffer size
+    let data = [];
+    let labels = [];
+    let time = 0;
 
-    window.onload = () => {
-      const ctx = document.getElementById('chart').getContext('2d');
-      chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: labels,
-          datasets: [{
-            label: 'Voltage (0–4095)',
-            data: data,
-            borderColor: 'red',
-            borderWidth: 1,
-            pointRadius: 2,
-          }]
-        },
-        options: {
-          animation: false,
-          scales: {
-            y: {
-              suggestedMin: 0,
-              suggestedMax: 4095
-            }
+    const ADC_MAX = 4095;
+    const V_REF = 3.3;
+
+    // Setup Chart.js chart
+    const ctx = document.getElementById('chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Voltage (V)',
+          data: data,
+          borderColor: 'red',
+          borderWidth: 1,
+          pointRadius: 2,
+          tension: 0.1
+        }]
+      },
+      options: {
+        animation: false,
+        scales: {
+          y: {
+            suggestedMin: 0,
+            suggestedMax: V_REF
           }
         }
-      });
-    };
+      }
+    });
+
+    function updateStatus(text) {
+      document.getElementById('status').innerText = "Status: " + text;
+    }
 
     async function connect() {
-      port = await navigator.serial.requestPort();
-      await port.open({ baudRate: 115200 });
-      document.getElementById("status").innerText = "Status: Connected";
-    }
-
-    async function start() {
-      if (!port) return;
-
-      const writer = port.writable.getWriter();
-      await writer.write(new TextEncoder().encode('S'));  // Start command
-      writer.releaseLock();
-
-      running = true;
-      document.getElementById("status").innerText = "Status: Running";
-      reader = port.readable.getReader();
-      listenBuffered();
-    }
-
-    async function stop() {
-      running = false;
-      if (reader) {
-        await reader.cancel();
-        reader.releaseLock();
-        reader = null;
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        writer = port.writable.getWriter();
+        reader = port.readable.getReader();
+        updateStatus("Connected");
+        readLoop();
+      } catch (err) {
+        updateStatus("Connection failed: " + err);
       }
-      document.getElementById("status").innerText = "Status: Stopped";
     }
 
-    async function listenBuffered() {
-      let rawBuffer = [];
+    async function startCapture() {
+      if (!writer) {
+        alert("Please connect first");
+        return;
+      }
+      await writer.write(new TextEncoder().encode('S'));
+      running = true;
+      updateStatus("Started triggered capture");
+    }
 
-      while (running && reader) {
+    async function stopCapture() {
+      if (!writer) return;
+      await writer.write(new TextEncoder().encode('P'));
+      running = false;
+      updateStatus("Stopped");
+    }
+
+    async function readLoop() {
+      let buffer = new Uint8Array(BUFFER_SIZE * 2);
+      let bytesReceived = 0;
+
+      while (port.readable) {
         try {
           const { value, done } = await reader.read();
-          if (done || !value) break;
-
-          for (let byte of value) {
-            rawBuffer.push(byte);
-
-            if (rawBuffer.length >= BATCH_SIZE * 2) {
-              // Process buffered data
-              for (let i = 0; i < rawBuffer.length; i += 2) {
-                let sample = rawBuffer[i] | (rawBuffer[i + 1] << 8);
-                data.push(sample);
-                labels.push(time++);
+          if (done) {
+            console.log("Stream closed");
+            break;
+          }
+          if (value) {
+            for (let i = 0; i < value.length; i++) {
+              if (bytesReceived < buffer.length) {
+                buffer[bytesReceived++] = value[i];
               }
-
-              // Trim buffer and chart to last 200 samples
-              rawBuffer = [];
-              if (data.length > 200) {
-                data.splice(0, data.length - 200);
-                labels.splice(0, labels.length - 200);
+              if (bytesReceived === buffer.length) {
+                processBuffer(buffer);
+                bytesReceived = 0;
               }
-
-              chart.update();
-
-              // Wait a short time before continuing
-              await new Promise(resolve => setTimeout(resolve, UPDATE_DELAY));
             }
           }
-        } catch (err) {
-          console.error("Read error:", err);
-          document.getElementById("status").innerText = "Status: Error";
+        } catch (error) {
+          console.error(error);
+          updateStatus("Read error: " + error);
           break;
         }
       }
+      updateStatus("Disconnected");
+    }
+
+    function processBuffer(buffer) {
+      for (let i = 0; i < BUFFER_SIZE; i++) {
+        // Little-endian decoding (LSB first)
+        let low = buffer[2*i];
+        let high = buffer[2*i + 1];
+        let raw = (high << 8) | low;
+
+        // Convert raw ADC (0-4095) to voltage
+        let voltage = (raw / ADC_MAX) * V_REF;
+        data.push(voltage);
+        labels.push(time++);
+      }
+      // Keep last 2048 points to limit chart size
+      if (data.length > 2048) {
+        data.splice(0, data.length - 2048);
+        labels.splice(0, labels.length - 2048);
+      }
+      chart.update();
     }
   </script>
 </body>

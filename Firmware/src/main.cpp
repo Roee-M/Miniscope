@@ -1,39 +1,66 @@
 #include <Arduino.h>
 
-bool running = true;
-bool signal_state = false;
-unsigned long last_toggle = 0;
-const unsigned long clock_period_ms = 100;  // 1 Hz clock = 1000 ms period (toggle every 500 ms)
+#define BUFFER_SIZE 1024
+const uint16_t triggerThreshold = 1241; // ~1V trigger for 12-bit ADC (3.3V ref)
+
+uint16_t buffer[BUFFER_SIZE];
+volatile bool capturing = false;
+volatile uint16_t captureIndex = 0;
+bool started = false;
+
+uint16_t mockSample = 0;
+uint16_t clockCounter = 0;
+const uint16_t clockPeriod = 100; // change for clock speed (samples per half period)
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial);  // Wait for serial connection
+  while (!Serial); // wait for serial connection
+  Serial.println("MiniScope Triggered Capture (Mock Clock) Ready");
 }
 
 void loop() {
-  // Check for Start/Stop commands
+  // Check start/stop commands
   if (Serial.available()) {
     char cmd = Serial.read();
     if (cmd == 'S') {
-      running = true;
+      started = true;
+      capturing = false;
+      captureIndex = 0;
+      Serial.println("Started triggered capture");
     } else if (cmd == 'P') {
-      running = false;
+      started = false;
+      capturing = false;
+      captureIndex = 0;
+      Serial.println("Stopped");
     }
   }
 
-  if (running) {
-    unsigned long now = millis();
+  if (!started) return;
 
-    // Toggle the signal every 500 ms (half period)
-    if (now - last_toggle >= clock_period_ms / 2) {
-      last_toggle = now;
-      signal_state = !signal_state;
+  // Generate mock clock signal: toggles between 0 and 4095 every clockPeriod samples
+  if (clockCounter < clockPeriod) {
+    mockSample = 0;
+  } else {
+    mockSample = 4095;
+  }
+  clockCounter++;
+  if (clockCounter >= 2 * clockPeriod) clockCounter = 0;
+
+  // Trigger when voltage > 1V → when mockSample is high (4095)
+  if (!capturing) {
+    if (mockSample > triggerThreshold) {
+      capturing = true;
+      captureIndex = 0;
     }
+  }
 
-    // Send the current signal value as a 2-byte sample (simulate ADC)
-    uint16_t sample = signal_state ? 4095 : 0;  // 12-bit full scale or zero
-    Serial.write((uint8_t*)&sample, 2);
+  if (capturing) {
+    buffer[captureIndex++] = mockSample;
 
-    delayMicroseconds(100);  // Sampling rate (~10 kHz)
+    if (captureIndex >= BUFFER_SIZE) {
+      Serial.write((uint8_t*)buffer, BUFFER_SIZE * 2);
+      capturing = false;
+      captureIndex = 0;
+    }
   }
 }
