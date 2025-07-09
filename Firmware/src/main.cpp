@@ -1,9 +1,13 @@
 #include <Arduino.h>
-#define LED_PIN 48
+#define LED_PIN 8
 #define LB_ADC_PIN 4  // GPIO4 for analogRead
 #define LB_OUT_PIN 5  // GPIO5 outputs simulated signal
 
-int val = 1;
+const int amplitude = 127;   // PWM amplitude (0-127)
+const int offset = 128;      // PWM offset (middle point)
+const float frequency = 1;   // 1 Hz sine wave
+const int sampleCount = 100; // number of steps per cycle
+int val = 500;
 
 void setup() {
   Serial.begin(115200); 
@@ -16,22 +20,22 @@ void setup() {
 
 void loop() {
   digitalWrite(LED_PIN, HIGH); // Turn LED on   
+  static int i = 0;
+  float angle = (2 * PI * i) / sampleCount;
+  int pwmValue = (int)(offset + amplitude * sin(angle));
+  analogWrite(LB_OUT_PIN, pwmValue);
 
-  digitalWrite(LB_OUT_PIN, HIGH);  // simulate signal
-  delay(1);
-  val = analogRead(LB_ADC_PIN);
-  Serial.print("HIGH: ");
+  digitalWrite(LED_PIN, pwmValue > 128 ? HIGH : LOW);
+
+  delay(10);
+
+  int val = analogRead(LB_ADC_PIN);
+  Serial.print("Sine PWM: ");
+  Serial.print(pwmValue);
+  Serial.print(" ADC: ");
   Serial.println(val);
 
-  digitalWrite(LED_PIN, LOW);  // Turn LED off
-
-  digitalWrite(LB_OUT_PIN, LOW);  // simulate signal
-  delay(1);
-  val = analogRead(LB_ADC_PIN);
-  Serial.print("LOW: ");
-  Serial.println(val);
-
-  delay(100);
+  i = (i + 1) % sampleCount;
 }
 
 // TODO
