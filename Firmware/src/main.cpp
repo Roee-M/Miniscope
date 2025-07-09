@@ -1,37 +1,43 @@
 #include <Arduino.h>
-#include "signal_generator.h"
+#include "SignalGenerator.h"
+#include "ADCSampler.h"
+#include "WifiSender.h"
 
 #define LED_PIN 8
 #define LB_ADC_PIN 4
 #define LB_OUT_PIN 5
 
+const size_t BUFFER_SIZE = 100;
+
 SignalGenerator signalGen(LB_OUT_PIN, LED_PIN);
+ADCSampler adcSampler(LB_ADC_PIN, BUFFER_SIZE);
+WifiSender wifiSender;
 
 void setup() {
   Serial.begin(115200);
-  analogReadResolution(12);
   signalGen.begin();
-  Serial.println("Finished setup");
+  adcSampler.begin();
+  wifiSender.begin("", "");  // replace with real creds
 }
 
 void loop() {
   int pwmValue = signalGen.nextSample();
   signalGen.outputSample(pwmValue);
 
-  delay(10);
+  if (adcSampler.sample()) {
+    wifiSender.sendBuffer(adcSampler.getBuffer(), adcSampler.getBufferSize());
+    delay(5000); // Wait before allowing another trigger
+  }
 
-  int val = analogRead(LB_ADC_PIN);
-  Serial.print("Sine PWM: ");
-  Serial.print(pwmValue);
-  Serial.print(" ADC: ");
-  Serial.println(val);
+  delay(10);
 }
+
 
 // TODO
 // Other ESP:
 //   Connect LB
   //? read_ADC() (-> API, implement as actual ADC SPI reads later)
-  //? store in ESP memory
+  //? store in ESP memory - fill out buffer
   //? Add trigger functionality
   //? send over Wifi/USB/mail
   //? simple server to plot incoming data
