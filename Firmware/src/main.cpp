@@ -20,8 +20,10 @@ bool dataSent = false;
 
 void fillBuffer() {
   Serial.println("Filling buffer with simulated data...");
-  for (size_t i = 0; i < BUFFER_SIZE; i++) {
-    adcBuffer[i] = i & 0xFF;  // simple pattern for testing
+  for (size_t i = 0; i < BUFFER_SIZE; i += 2) {
+    uint16_t sample = (i / 2) % 4096;  // ramp 0–4095
+    adcBuffer[i] = sample & 0xFF;        // LSB
+    adcBuffer[i+1] = (sample >> 8) & 0xFF; // MSB
   }
   Serial.println("Buffer filled");
 }
