@@ -1,36 +1,101 @@
 #include <Arduino.h>
-#include "SignalGenerator.h"
-#include "ADCSampler.h"
-#include "WifiSender.h"
+#include <WiFi.h>
+#include <WiFiUdp.h>
 
-#define LED_PIN 8
-#define LB_ADC_PIN 4
-#define LB_OUT_PIN 5
+const char* ssid = "MINISCOPE_ESP32";
+const char* password = "12345678";
 
-const size_t BUFFER_SIZE = 100;
+WiFiUDP udp;
+const int localPort = 4210;
 
-SignalGenerator signalGen(LB_OUT_PIN, LED_PIN);
-ADCSampler adcSampler(LB_ADC_PIN, BUFFER_SIZE);
-WifiSender wifiSender;
+IPAddress remoteIP;
+uint16_t remotePort;
+bool clientKnown = false;
+
+#define BUFFER_SIZE (1 * 1000 * 1000 * 2)  // 6 MB for 3MSPS * 2 bytes/sample
+uint8_t* adcBuffer = nullptr;
+
+bool triggered = false;
+bool dataSent = false;
+
+void fillBuffer() {
+  Serial.println("Filling buffer with simulated data...");
+  for (size_t i = 0; i < BUFFER_SIZE; i++) {
+    adcBuffer[i] = i & 0xFF;  // simple pattern for testing
+  }
+  Serial.println("Buffer filled");
+}
 
 void setup() {
   Serial.begin(115200);
-  signalGen.begin();
-  adcSampler.begin();
-  wifiSender.begin("", "");  // replace with real creds
+  delay(1000);
+  Serial.println("Starting MiniScope UDP Server");
+
+  adcBuffer = (uint8_t*)ps_malloc(BUFFER_SIZE);
+  if (!adcBuffer) {
+    Serial.println("Failed to allocate 6MB buffer in PSRAM!");
+    while (true) delay(1000);
+  }
+  Serial.println("6MB buffer allocated in PSRAM");
+
+  WiFi.softAP(ssid, password);
+  IPAddress IP = WiFi.softAPIP();
+  Serial.print("Access Point IP address: ");
+  Serial.println(IP);
+
+  udp.begin(localPort);
+  Serial.printf("UDP server listening on port %d\n", localPort);
 }
 
 void loop() {
-  int pwmValue = signalGen.nextSample();
-  signalGen.outputSample(pwmValue);
+  int packetSize = udp.parsePacket();
+  if (packetSize > 0) {
+    char incoming[packetSize + 1];
+    udp.read(incoming, packetSize);
+    incoming[packetSize] = '\0';
 
-  if (adcSampler.sample()) {
-    wifiSender.sendBuffer(adcSampler.getBuffer(), adcSampler.getBufferSize());
-    delay(5000); // Wait before allowing another trigger
+    remoteIP = udp.remoteIP();
+    remotePort = udp.remotePort();
+    clientKnown = true;
+
+    Serial.printf("Received command: '%s' from %s:%d\n", incoming, remoteIP.toString().c_str(), remotePort);
+
+    if (strcmp(incoming, "t") == 0 && !triggered){ //Trigger
+      Serial.println("Trigger activated - filling buffer");
+      fillBuffer();
+      triggered = true;
+      dataSent = false;
+      Serial.println("Trigger activated - ready to send data");
+    }
+    else if (strcmp(incoming, "r") == 0) { // Reset
+      triggered = false;
+      dataSent = false;
+      Serial.println("Reset command received - ready for new trigger");
+    }
+    else{
+
+    }
   }
 
-  delay(10);
+  if (clientKnown && triggered && !dataSent) {
+    const size_t chunkSize = 1400;
+    size_t sent = 0;
+
+    Serial.println("Sending data buffer over UDP...");
+    while (sent < BUFFER_SIZE) {
+      Serial.print(".");
+      size_t toSend = min(chunkSize, BUFFER_SIZE - sent);
+      udp.beginPacket(remoteIP, remotePort);
+      udp.write(adcBuffer + sent, toSend);
+      udp.endPacket();
+      sent += toSend;
+      delayMicroseconds(200);  // tweak as needed
+    }
+    Serial.printf("Finished sending %u bytes over UDP\n", BUFFER_SIZE);
+    dataSent = true;
+  }
 }
+
 
 
 // TODO

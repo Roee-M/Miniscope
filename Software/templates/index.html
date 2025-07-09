@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>MiniScope - UDP over WiFi</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <style>
+    canvas { max-width: 100%; height: 300px; }
+    button { margin: 10px; padding: 10px 20px; }
+    #status { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>MiniScope Triggered UDP Capture</h1>
+  <button onclick="startCapture()">Start</button>
+  <div id="status">Status: Ready</div>
+  <canvas id="chart"></canvas>
+
+  <script>
+    const socket = io('/scope');
+    let data = [], labels = [], time = 0;
+
+    const ctx = document.getElementById('chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Voltage (V)',
+          data: data,
+          borderColor: 'red',
+          borderWidth: 1,
+          pointRadius: 0,
+          tension: 0.1
+        }]
+      },
+      options: {
+        animation: false,
+        scales: { y: { min: 0, max: 3.3 } }
+      }
+    });
+
+    function startCapture() {
+      document.getElementById('status').innerText = "Status: Trigger sent, waiting...";
+      socket.emit('start_trigger');
+      data = [], labels = [], time = 0;
+    }
+
+    socket.on('adc_data', msg => {
+      data.push(msg.v);
+      labels.push(time++);
+      if (data.length > 2048) {
+        data.shift();
+        labels.shift();
+      }
+      chart.update();
+    });
+  </script>
+</body>
+</html>
