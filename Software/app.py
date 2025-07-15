@@ -1,7 +1,8 @@
 import socket
 import threading
-from flask import Flask, render_template
-from flask_socketio import SocketIO, emit
+from flask import Flask, render_template, send_file, make_response
+from flask_socketio import SocketIO
+import io
 
 ESP_IP = "192.168.4.1"
 ESP_PORT = 4210
@@ -11,18 +12,19 @@ DATA_SIZE = 6 * 1000 * 1000  # 6 MB
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
+# Store the last capture in memory
+last_capture = None
+
 def udp_receiver():
+    global last_capture
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('', 0))  # bind to any free port
 
-    # Send 'r' to reset ESP32 state
     print("Sending reset signal...")
     sock.sendto(b'r', (ESP_IP, ESP_PORT))
 
-    # Short wait before sending trigger
     socketio.sleep(0.2)
 
-    # Send 't' to trigger capture
     print("Sending trigger signal...")
     sock.sendto(b't', (ESP_IP, ESP_PORT))
 
@@ -40,24 +42,25 @@ def udp_receiver():
     print(f"Total received: {len(received)} bytes")
     sock.close()
 
-    # Stream each 2-byte sample to the browser
-    for i in range(0, len(received) - 1, 200):  # 100 samples = 200 bytes
-        voltages = []
-        for j in range(0, 200, 2):
-            if i + j + 1 >= len(received):
-                break
-            raw = received[i + j] | (received[i + j + 1] << 8)
-            voltage = (raw / 4095.0) * 3.3
-            voltages.append(voltage)
-        socketio.emit('adc_data_batch', {'v': voltages}, namespace='/scope')
-        socketio.sleep(0.005)  # Yield control
-    
+    # Save to memory for HTTP transfer
+    last_capture = bytes(received)
+
+    # Notify client we're done capturing
     socketio.emit('done', namespace='/scope')
 
-    
 @app.route('/')
 def index():
-    return render_template('index.html')  # Make sure index.html is in /templates
+    return render_template('index.html')  # index.html in /templates
+
+@app.route('/capture.bin')
+def get_capture():
+    global last_capture
+    if last_capture is None:
+        return "No capture available yet", 404
+
+    buf = io.BytesIO(last_capture)
+    response = make_response(send_file(buf, mimetype='application/octet-stream', as_attachment=False, download_name='capture.bin'))
+    return response
 
 @socketio.on('start_trigger', namespace='/scope')
 def handle_trigger():

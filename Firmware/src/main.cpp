@@ -13,6 +13,7 @@ uint16_t remotePort;
 bool clientKnown = false;
 
 #define BUFFER_SIZE (1 * 1000 * 1000 * 2)  // 6 MB for 3MSPS * 2 bytes/sample
+// #define BUFFER_SIZE (1 * 1000 * 2)  // 6 MB for 3MSPS * 2 bytes/sample
 uint8_t* adcBuffer = nullptr;
 
 bool triggered = false;
@@ -35,10 +36,10 @@ void setup() {
 
   adcBuffer = (uint8_t*)ps_malloc(BUFFER_SIZE);
   if (!adcBuffer) {
-    Serial.println("Failed to allocate 6MB buffer in PSRAM!");
+    Serial.println("Failed to allocate buffer in PSRAM!");
     while (true) delay(1000);
   }
-  Serial.println("6MB buffer allocated in PSRAM");
+  Serial.println("Buffer allocated in PSRAM");
 
   WiFi.softAP(ssid, password);
   IPAddress IP = WiFi.softAPIP();

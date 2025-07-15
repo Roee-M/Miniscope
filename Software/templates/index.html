@@ -1,123 +1,100 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>MiniScope - UDP over WiFi</title>
+  <title>MiniScope - Fast Capture</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
   <style>
     body { font-family: sans-serif; padding: 20px; }
-    canvas { 
-      width: 100%; 
-      max-width: 800px; 
-      height: 250px; 
-      display: block; 
-      margin: 20px auto; 
+    canvas {
+      width: 100%;
+      max-width: 800px;
+      height: 300px;  /* increase a bit */
+      display: block;
+      margin: 20px auto;
     }
     button { margin: 10px; padding: 10px 20px; font-size: 16px; }
     #status { font-weight: bold; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <h1>📡 MiniScope Triggered UDP Capture</h1>
+  <h1>📡 MiniScope Fast Capture</h1>
   <button onclick="startCapture()">📷 Start Capture</button>
   <div id="status">Status: Ready</div>
   <canvas id="chart"></canvas>
 
   <script>
     const socket = io('/scope');
-    const ADC_MAX = 4095;
     const V_REF = 3.3;
-    const MAX_POINTS = 4096;
-
-    let data = [], labels = [], time = 0;
-    let buffer = [], labelBuffer = [];
-    let updateScheduled = false;
-    let receivedSamples = 0;
+    const SAMPLE_PERIOD_US = 0.333; // 3 MSPS
 
     const ctx = document.getElementById('chart').getContext('2d');
     const chart = new Chart(ctx, {
       type: 'line',
       data: {
-        labels: labels,
+        labels: [],
         datasets: [{
           label: 'Voltage (V)',
-          data: data,
+          data: [],
           borderColor: 'red',
           borderWidth: 1,
-          pointRadius: 0,
+          pointRadius: 0.1,
           tension: 0.1
         }]
       },
-    options: {
-      animation: false,
-      responsive: true,
-      scales: {
-        x: {
-          title: { display: true, text: 'Sample' },
-          ticks: {
-            autoSkip: true,
-            maxTicksLimit: 10  // Show max 10 labels on x-axis
+      options: {
+        animation: false,
+        responsive: true,
+        scales: {
+          x: {
+            title: { display: true, text: 'Time (µs)' },
+            ticks: { autoSkip: true, maxTicksLimit: 10 }
+          },
+          y: {
+            title: { display: true, text: 'Voltage (V)' },
+            min: 0,
+            max: V_REF
           }
-        },
-        y: {
-          title: { display: true, text: 'Voltage (V)' },
-          min: 0,
-          max: V_REF
         }
       }
-    }
     });
 
     function startCapture() {
-      document.getElementById('status').innerText = "Status: Sending trigger and waiting for data...";
-      data = [], labels = [], buffer = [], labelBuffer = [], time = 0, receivedSamples = 0;
+      document.getElementById('status').innerText = "Status: Triggering capture...";
+      chart.data.labels = [];
+      chart.data.datasets[0].data = [];
       chart.update();
       socket.emit('start_trigger');
-      window.scrollTo({ top: document.getElementById('chart').offsetTop, behavior: 'smooth' });
     }
 
-    function scheduleUpdate() {
-      if (!updateScheduled) {
-        updateScheduled = true;
-        requestAnimationFrame(() => {
-          data.push(...buffer);
-          labels.push(...labelBuffer);
-          buffer = [];
-          labelBuffer = [];
-          updateScheduled = false;
+    socket.on('done', async () => {
+      document.getElementById('status').innerText = "Status: Downloading data...";
 
-          if (data.length > MAX_POINTS) {
-            data.splice(0, data.length - MAX_POINTS);
-            labels.splice(0, labels.length - MAX_POINTS);
-          }
+      const res = await fetch('/capture.bin');
+      const buf = await res.arrayBuffer();
+      const view = new DataView(buf);
 
-          chart.update();
-        });
+      const data = [];
+      const labels = [];
+      const sampleCount = buf.byteLength / 2;  // number of 16-bit samples
+
+      for (let i = 0; i < buf.byteLength; i += 2) {
+        const raw = view.getUint16(i, true);  // little-endian
+        data.push((raw / 4095.0) * 3.3);
+        labels.push((i / 2) * 0.333);  // sample index * sample period in µs
       }
-    }
+
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = data;
+      chart.update();
+      console.log("First 10 data points:", data.slice(0,10));
+      console.log("First 10 labels:", labels.slice(0,10));
+      document.getElementById('status').innerText = `Status: Done. Received ${sampleCount} samples.`;
+    });
+
 
     socket.on('connect', () => {
-        console.log("Connected to server via WebSocket!");
-    });
-
-    socket.on('adc_data_batch', msg => {
-    for (let v of msg.v) {
-        buffer.push(v);
-        labelBuffer.push(time++);
-        receivedSamples++;
-    }
-
-    if (buffer.length >= 100) {
-        scheduleUpdate();
-    }
-    });
-
-    socket.on('done', () => {
-      document.getElementById('status').innerText = `Status: Done. Received ${receivedSamples} samples.`;
-      console.log("Done signal received from backend");
-      if (buffer.length > 0) {
-        scheduleUpdate();
-      }
+      console.log("Connected to server via WebSocket!");
     });
   </script>
 </body>
