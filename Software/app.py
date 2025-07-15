@@ -52,6 +52,9 @@ def udp_receiver():
         socketio.emit('adc_data_batch', {'v': voltages}, namespace='/scope')
         socketio.sleep(0.005)  # Yield control
     
+    socketio.emit('done', namespace='/scope')
+
+    
 @app.route('/')
 def index():
     return render_template('index.html')  # Make sure index.html is in /templates
