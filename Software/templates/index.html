@@ -1,25 +1,27 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>MiniScope - Fast Capture</title>
+  <title>MiniScope - Fast Capture with Zoom</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
   <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
   <style>
     body { font-family: sans-serif; padding: 20px; }
-    canvas {
-      width: 100%;
-      max-width: 800px;
-      height: 300px;  /* increase a bit */
-      display: block;
-      margin: 20px auto;
+    canvas { 
+      width: 100%; 
+      max-width: 800px; 
+      height: 300px; 
+      display: block; 
+      margin: 20px auto; 
     }
     button { margin: 10px; padding: 10px 20px; font-size: 16px; }
     #status { font-weight: bold; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <h1>📡 MiniScope Fast Capture</h1>
+  <h1>📡 MiniScope Fast Capture with Zoom</h1>
   <button onclick="startCapture()">📷 Start Capture</button>
+  <button onclick="chart.resetZoom()">🔄 Reset Zoom</button>
   <div id="status">Status: Ready</div>
   <canvas id="chart"></canvas>
 
@@ -38,7 +40,7 @@
           data: [],
           borderColor: 'red',
           borderWidth: 1,
-          pointRadius: 0.1,
+          pointRadius: 0,
           tension: 0.1
         }]
       },
@@ -54,6 +56,20 @@
             title: { display: true, text: 'Voltage (V)' },
             min: 0,
             max: V_REF
+          }
+        },
+        plugins: {
+          zoom: {
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              mode: 'x'
+            },
+            pan: {
+              enabled: true,
+              mode: 'x',
+              modifierKey: 'ctrl' // Hold CTRL while dragging to pan (optional)
+            }
           }
         }
       }
@@ -76,22 +92,23 @@
 
       const data = [];
       const labels = [];
-      const sampleCount = buf.byteLength / 2;  // number of 16-bit samples
+      const sampleCount = buf.byteLength / 2;
 
       for (let i = 0; i < buf.byteLength; i += 2) {
-        const raw = view.getUint16(i, true);  // little-endian
-        data.push((raw / 4095.0) * 3.3);
-        labels.push((i / 2) * 0.333);  // sample index * sample period in µs
+        const raw = view.getUint16(i, true);
+        data.push((raw / 4095.0) * V_REF);
+        labels.push((i / 2) * SAMPLE_PERIOD_US);
       }
+
+      console.log("First 10 data points:", data.slice(0,10));
+      console.log("First 10 labels:", labels.slice(0,10));
 
       chart.data.labels = labels;
       chart.data.datasets[0].data = data;
       chart.update();
-      console.log("First 10 data points:", data.slice(0,10));
-      console.log("First 10 labels:", labels.slice(0,10));
+
       document.getElementById('status').innerText = `Status: Done. Received ${sampleCount} samples.`;
     });
-
 
     socket.on('connect', () => {
       console.log("Connected to server via WebSocket!");
