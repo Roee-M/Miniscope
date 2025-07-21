@@ -45,6 +45,8 @@ void setup() {
   if (!ringBuffer) {
     Serial.println("Failed to allocate ring buffer in PSRAM!");
   }
+    // optional debug: zero ring so unwritten region is known
+  memset(ringBuffer, 0, BUFFER_SIZE * sizeof(uint16_t));
   
   Serial.println("---finished setup---");
 }
