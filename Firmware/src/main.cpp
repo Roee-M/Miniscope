@@ -1,3 +1,8 @@
+/* this main is used to read data samples form the AD7276 adc on the miniscope, and display it on the serial print
+  the current method is to use the SPI library and uses hardware CS pin to automaticly toggle it instead of manually toggling it
+  16/06/2025
+*/
+
 #include <Arduino.h>
 #include <SPI.h>
 
@@ -5,6 +10,24 @@
 #define SCLK_PIN 12
 #define MISO_PIN 13
 #define VREF 3.3
+#define SPI_SPEED 48000000  // 48 MHz
+
+
+#define BUFFER_SIZE (1 * 1000)  // 1M samples for MVP - CHANGE if NEEDED - chaged to 1000
+#define SAMPLE_RATE 3000000  // 3 MSPS
+#define SAMPLE_T 2000  // trigger voltage threshold - CHANGE if NEEDED
+#define CAPTURE_SIZE   (BUFFER_SIZE / 2)  // total samples to save on trigger
+#define PRINT_AROUND   32                 // how many samples around the trigger to print automatically
+#define SPI_HZ 20000000  // SPI clock speed
+
+
+uint16_t *ringBuffer;
+volatile size_t writeIndex = 0;
+bool triggered = false;
+bool captureReady = false;
+size_t triggerIndex = 0;
+size_t samplesAfterTrigger = 0;
+const size_t HALF_WINDOW = BUFFER_SIZE / 2;
 
 SPIClass SPI_ADC(FSPI);  // Use FSPI for ESP32-S3
 
@@ -15,37 +38,104 @@ void setup() {
   // digitalWrite(CS_PIN, HIGH);
   SPI_ADC.begin(SCLK_PIN, MISO_PIN, -1, CS_PIN);
   SPI_ADC.setHwCs(1);
-  SPI_ADC.beginTransaction(SPISettings(48000000, MSBFIRST, SPI_MODE1));  // 48 MHz, Mode 1
+  SPI_ADC.beginTransaction(SPISettings(SPI_HZ, MSBFIRST, SPI_MODE0));  // 20 MHz, Mode 0 tried 40Mhz and Mode 1
+  delay(1000);  // wait for serial to be ready
+  Serial.println("allocating ring buffer");
+  ringBuffer = (uint16_t*)ps_malloc(BUFFER_SIZE * sizeof(uint16_t));
+  if (!ringBuffer) {
+    Serial.println("Failed to allocate ring buffer in PSRAM!");
+  }
   
-
-  Serial.println("finished setup ");
+  Serial.println("---finished setup---");
 }
 
 uint16_t readADC() {
   // digitalWrite(CS_PIN, LOW);   // Start conversion
   uint16_t adc_raw = SPI_ADC.transfer16(0x0000);  // Send 16 dummy bits, receive ADC data
   // digitalWrite(CS_PIN, HIGH);  // End frame
-  // Extract the 12-bit ADC result from bits [13:2]
+  // Extract the 12-bit ADC result from bits [13:2] - WHY?
   return (adc_raw >> 2) & 0x0FFF;
+  // Extract the 12-bit ADC result from bits [11:0] - TESTING
+  // return (adc_raw) & 0x0FFF;
 }
+
+void printCapture() {
+  size_t start = (triggerIndex + BUFFER_SIZE - HALF_WINDOW/2) % BUFFER_SIZE;
+  Serial.println("=== Triggered Window (raw values) ===");
+  for (size_t i = 0; i < HALF_WINDOW; ++i) {
+    size_t idx = (start + i) % BUFFER_SIZE;
+    Serial.print(ringBuffer[idx]);
+    Serial.print(",");
+  }
+  Serial.println("=== End Window ===");
+}
+
 
 void loop() {
+uint16_t sample = readADC();
+  ringBuffer[writeIndex] = sample;
 
-  // static unsigned long lastMicros = 0;
-  // unsigned long now = micros();
-  uint16_t sample = readADC();
-  float voltage = ((float)sample / 4095.0) * VREF;
+  if (!triggered && sample > SAMPLE_T) {
+    triggered = true;
+    triggerIndex = writeIndex;
+    samplesAfterTrigger = 0;
+    Serial.printf("Trigger at idx=%u raw=%u\n", (unsigned)triggerIndex, sample);
+  }
 
-  Serial.print("ADC Raw: ");
-  Serial.println(sample);
-  Serial.print(" | Voltage: ");
-  Serial.println(voltage, 4);  // Print with 4 decimal places
-  // Serial.print(" | Δt (us): ");
-  // Serial.println(now - lastMicros);
-  // lastMicros = now;
+  if (triggered && !captureReady) {
+    samplesAfterTrigger++;
+    if (samplesAfterTrigger >= HALF_WINDOW / 2) { 
+      captureReady = true;
+      Serial.println("Capture ready: pre-trigger + post-trigger window complete.");
+      printCapture();
+    }
+  }
+
+  writeIndex = (writeIndex + 1) % BUFFER_SIZE;
 }
 
 
+// void loop() {
+
+//   // --- sampling and storing the data in the ring buffer ---
+
+//   uint16_t sample = readADC();
+//   // float voltage = ((float)sample / 4095.0) * VREF;
+//   ringBuffer[writeIndex++ %(BUFFER_SIZE)] = sample;
+//   if (sample > SAMPLE_T && !triggered)
+//   {
+//     triggered = true;
+
+  
+//   }
+  
+
+//   if (writeIndex % 1000 == 0) {  // print every 1000 samples
+//     Serial.printf("Sample %u: %u\n", writeIndex, voltage);
+//   }
+
+  // --- sampling and printing the data - uncomment for debugging ---
+
+  // // static unsigned long lastMicros = 0;
+  // // unsigned long now = micros();
+  // uint16_t sample = readADC();
+  // float voltage = ((float)sample / 4095.0) * VREF;
+
+  // Serial.print("ADC Raw: ");
+  // Serial.println(sample);
+  // Serial.print(" | Voltage: ");
+  // Serial.println(voltage, 4);  // Print with 4 decimal places
+  // // Serial.print(" | Δt (us): ");
+  // // Serial.println(now - lastMicros);
+  // // lastMicros = now;
+// }
+
+
+/*  the version below uses the esp-idf version of the spi_master driver, which is more low level and requires manual toggling of the CS pin
+   this version is not used in the current implementation, but is kept for reference
+   it can be used to read samples from the AD7276 adc on the miniscope, and display it on the serial print
+   maybe used for later more advanced features like using DMA
+*/
 // #include "Arduino.h"
 // #include "driver/spi_master.h"
 // #include "driver/gpio.h"
