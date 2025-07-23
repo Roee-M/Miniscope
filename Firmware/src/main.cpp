@@ -1,4 +1,4 @@
-/* this main is used to read data samples form the AD7276 adc on the miniscope, and display it on the serial print
+/* This main is used to read data samples form the AD7276 adc on the miniscope, and display it on the serial print
   the current method is to use the SPI library and uses hardware CS pin to automaticly toggle it instead of manually toggling it
   16/06/2025
 */
@@ -10,7 +10,8 @@
 #define SCLK_PIN 12
 #define MISO_PIN 13
 #define VREF 3.3
-#define SPI_SPEED 48000000  // 48 MHz
+// #define SPI_SPEED 48000000  // 48 MHz
+#define TRIGGER_PIN 0  // Pin for manually triggering
 
 
 #define BUFFER_SIZE (1 * 1000)  // 1M samples for MVP - CHANGE if NEEDED - chaged to 1000
@@ -21,6 +22,7 @@
 #define SPI_HZ 20000000  // SPI clock speed
 
 
+
 uint16_t *ringBuffer;
 volatile size_t writeIndex = 0;
 bool triggered = false;
@@ -28,6 +30,7 @@ bool captureReady = false;
 size_t triggerIndex = 0;
 size_t samplesAfterTrigger = 0;
 const size_t HALF_WINDOW = BUFFER_SIZE / 2;
+bool button_pressed = false;  // for manual trigger reset
 
 SPIClass SPI_ADC(FSPI);  // Use FSPI for ESP32-S3
 
@@ -38,7 +41,7 @@ void setup() {
   // digitalWrite(CS_PIN, HIGH);
   SPI_ADC.begin(SCLK_PIN, MISO_PIN, -1, CS_PIN);
   SPI_ADC.setHwCs(1);
-  SPI_ADC.beginTransaction(SPISettings(SPI_HZ, MSBFIRST, SPI_MODE0));  // 20 MHz, Mode 0 tried 40Mhz and Mode 1
+  SPI_ADC.beginTransaction(SPISettings(SPI_HZ, MSBFIRST, SPI_MODE0));  // 20 MHz, Mode 0 - best results, try 40Mhz. tried 40Mhz and Mode 1
   delay(1000);  // wait for serial to be ready
   Serial.println("allocating ring buffer");
   ringBuffer = (uint16_t*)ps_malloc(BUFFER_SIZE * sizeof(uint16_t));
@@ -48,9 +51,18 @@ void setup() {
     // optional debug: zero ring so unwritten region is known
   memset(ringBuffer, 0, BUFFER_SIZE * sizeof(uint16_t));
   
+  // --- setup trigger pin ---
+  pinMode(TRIGGER_PIN, INPUT_PULLUP);
+
   Serial.println("---finished setup---");
 }
 
+/**
+ * @brief Read a sample from the AD7276 ADC
+ *        using SPI transfer.
+ * 
+ * @return uint16_t - sample value between 0 and 4095
+ */
 uint16_t readADC() {
   // digitalWrite(CS_PIN, LOW);   // Start conversion
   uint16_t adc_raw = SPI_ADC.transfer16(0x0000);  // Send 16 dummy bits, receive ADC data
@@ -61,6 +73,10 @@ uint16_t readADC() {
   // return (adc_raw) & 0x0FFF;
 }
 
+/**
+ * @brief prints the captured data around the trigger point
+ *        in the ring buffer.
+ */
 void printCapture() {
   size_t start = (triggerIndex + BUFFER_SIZE - HALF_WINDOW/2) % BUFFER_SIZE;
   Serial.println("=== Triggered Window (raw values) ===");
@@ -74,7 +90,7 @@ void printCapture() {
 
 
 void loop() {
-uint16_t sample = readADC();
+  uint16_t sample = readADC();
   ringBuffer[writeIndex] = sample;
 
   if (!triggered && sample > SAMPLE_T) {
@@ -90,7 +106,21 @@ uint16_t sample = readADC();
       captureReady = true;
       Serial.println("Capture ready: pre-trigger + post-trigger window complete.");
       printCapture();
+
     }
+  }
+
+  if (digitalRead(TRIGGER_PIN) == LOW && !button_pressed) {  
+    button_pressed = true;  // Set flag to prevent multiple resets
+    triggered = false;
+    captureReady = false;
+    samplesAfterTrigger = 0;
+    triggerIndex = 0;
+    writeIndex = 0;  // Reset write index
+    memset(ringBuffer, 0, BUFFER_SIZE * sizeof(uint16_t));
+    Serial.println("Manual trigger reset! Waiting for next signal...");
+    delay(10);  // Debounce delay
+    button_pressed = false;  // Reset button pressed flag
   }
 
   writeIndex = (writeIndex + 1) % BUFFER_SIZE;
