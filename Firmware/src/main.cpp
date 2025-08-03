@@ -42,8 +42,10 @@ void setup()
     Serial.println("---Starting setup---");
     pinMode(CS_PIN, OUTPUT);
     digitalWrite(CS_PIN, HIGH);
-    SPI_ADC.begin(SCLK_PIN, MISO_PIN, -1, -1);
-     Serial.println("SPI initialized using manual toggeling CS");
+    CS_HIGH();
+    SPI_ADC.begin(SCLK_PIN, MISO_PIN, -1, CS_PIN);
+    SPI_ADC.setHwCs(1); 
+    Serial.println("SPI initialized using manual toggeling CS");
 
     // SPI_ADC.begin(SCLK_PIN, MISO_PIN, -1, CS_PIN); 
     // SPI_ADC.setHwCs(1);
@@ -76,9 +78,9 @@ void setup()
  */
 uint16_t readADC()
 {
-    CS_LOW();
+    // CS_LOW();
     uint16_t adc_raw = SPI_ADC.transfer16(0x0000); // Send 16 dummy bits, receive ADC data   
-    CS_HIGH();
+    // CS_HIGH();
     return (adc_raw >> 2) & 0x0FFF;
 }
 
