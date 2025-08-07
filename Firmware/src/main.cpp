@@ -1,10 +1,15 @@
 
 
-/* 06/08/2025 - ADC Sampling with UDP Server
-    fastest sampling logic,
- *
+/* 07/08/2025 - multi-task bare minumin ADC Sampling and printing
+    - fastest sampling logic - bare minimum
+    - 1.27MSPS
+    - double buffer for printing , both buffers in PSRAM
+    - manual trigger reset button
+    - formated printing in chunks, no grubled data
+    - using semphores only when capture ready coping and printing
+    - core1 : ADC sampling coping when capture ready
+    - core0 : printing
 */
-
 #include <Arduino.h>
 #include <SPI.h>
 #include "soc/spi_struct.h"
@@ -98,8 +103,10 @@ void IRAM_ATTR adcTask(void *pvParameters)
             {
                 captureReady = true;
                 Serial.println("Capture ready: pre-trigger + post-trigger window complete.");
+                xSemaphoreTake(bufferMutex, portMAX_DELAY);
                 memcpy(printingBuffer, ringBuffer, BUFFER_SIZE * sizeof(uint16_t));
-                delay(5000); // Allow time for Serial to print
+                xSemaphoreGive(bufferMutex);
+                delay(1000); // Allow time for Serial to print
                 // printCapture();
 
                 // send over UDP in future
@@ -111,6 +118,7 @@ void IRAM_ATTR adcTask(void *pvParameters)
         // Manual trigger reset button - after pressing waiting for (Voltage > V_T) sample > SAMPLE_T
         if (digitalRead(TRIGGER_PIN) == LOW && !button_pressed)
         {
+            xSemaphoreTake(bufferMutex, portMAX_DELAY);
             button_pressed = true; // Set flag to prevent multiple resets
             triggered = false;
             captureReady = false;
@@ -126,12 +134,15 @@ void IRAM_ATTR adcTask(void *pvParameters)
             printed = false;        // Reset printed flag
             Serial.println("reset bools done, waiting for next trigger...");
             delay(500); // Allow time for Serial to print
+            xSemaphoreGive(bufferMutex);
         }
     }
 }
 void setup()
 {
-    Serial.begin(115200); // Initialize Serial at 115200 baud
+    Serial.begin(115200);         // Initialize Serial at 115200 baud
+    Serial.setTxBufferSize(1024); // increase buffer sizes for printing purposes, default is 265
+    Serial.setRxBufferSize(1024); // increase buffer sizes for printing purposes, default is 265
     delay(1000);
     Serial.println("---Starting setup---");
     pinMode(CS_PIN, OUTPUT);
@@ -142,20 +153,21 @@ void setup()
     // Serial.print("initiating SPI with ADC at speed:");
     // Serial.println(SPI_HZ);
     // Serial.println("SPI initialized using HwCs");
+
+    // ---  Minimal SPI ADC communication setup ---
     SPI_ADC.beginTransaction(SPISettings(SPI_HZ, MSBFIRST, SPI_MODE0)); // 40 MHz, Mode 0 - best results, try 40Mhz. tried 40Mhz and Mode 1
 
     SPI2->ms_dlen.ms_data_bitlen = 15;
     SPI2->cmd.update = 1;
     while (SPI2->cmd.update)
-        delay(1000); // wait for serial to be ready
+    delay(1000); // wait for serial to be ready
     Serial.println("allocating ring buffer");
-    // ringBuffer = (uint16_t *)ps_malloc(BUFFER_SIZE * sizeof(uint16_t));
+    // ringBuffer = (uint16_t *)malloc(BUFFER_SIZE * sizeof(uint16_t));
     ringBuffer = (uint16_t *)ps_malloc(BUFFER_SIZE * sizeof(uint16_t));
     if (!ringBuffer)
     {
         Serial.println("Failed to allocate ring buffer in PSRAM!");
     }
-    // optional debug: zero ring so unwritten region is known
     memset(ringBuffer, 0, BUFFER_SIZE * sizeof(uint16_t));
 
     // allocating printBuffer
@@ -164,8 +176,16 @@ void setup()
     {
         Serial.println("Failed to allocate Printing buffer in PSRAM!");
     }
-    // optional debug: zero ring so unwritten region is known
     memset(printingBuffer, 0, BUFFER_SIZE * sizeof(uint16_t));
+
+    // Create a mutex for buffer only used when coping data to printingBuffer
+    bufferMutex = xSemaphoreCreateMutex();
+    if (!bufferMutex)
+    {
+        Serial.println("Failed to create buffer mutex!");
+        while (true);
+    }
+    Serial.println("bufferMutex created successfully");
 
     // --- setup trigger pin ---
     pinMode(TRIGGER_PIN, INPUT_PULLUP);
@@ -175,7 +195,7 @@ void setup()
     esp_task_wdt_deinit(); // Disable Task Watchdog for all tasks
 
     disableCore0WDT();                                                                             // disabling the watch dog for core 0, since we are using it for the ADC task
-    xTaskCreatePinnedToCore(adcTask, "ADC Task", 4096, NULL, 1, &adcTaskHandle, 1);                // Core 1
+    xTaskCreatePinnedToCore(adcTask, "ADC Task", 4096, NULL, 3, &adcTaskHandle, 1);                // Core 1
     xTaskCreatePinnedToCore(printingTask, "Printing Task", 4096, NULL, 1, &printingTaskHandle, 0); // Core 0
 }
 
@@ -200,27 +220,73 @@ inline uint16_t readADC()
  * @brief prints the captured data around the trigger point
  *        in the ring buffer.
  */
+// void printCapture()
+// {
+//     xSemaphoreTake(bufferMutex, portMAX_DELAY);
+//     Serial.print("Printing Capture from core: ");
+//     Serial.println(xPortGetCoreID());
+//     delay(100); // Allow time for Serial to print
+//     size_t start = (triggerIndex + BUFFER_SIZE - HALF_WINDOW) % BUFFER_SIZE;
+//     Serial.println("=== Triggered Window (raw values) ===");
+//     for (size_t i = 0; i < BUFFER_SIZE; ++i)
+//     {
+//         size_t idx = (start + i) % BUFFER_SIZE;
+//         Serial.print(printingBuffer[idx]);
+//         if (printingBuffer[idx] > 4095)
+//         {
+//             Serial.print("[ERR]");
+//         }
+//         Serial.print(", ");
+//         delay(2);
+//     }
+//     Serial.println("=== End Window ===");
+//     xSemaphoreGive(bufferMutex);
+// }
+
+// debugging printCapture function
 void printCapture()
 {
-    Serial.print("Printing Capture from core: ");
-    Serial.println(xPortGetCoreID());
-    delay(100); // Allow time for Serial to print
-    size_t start = (triggerIndex + BUFFER_SIZE - HALF_WINDOW) % BUFFER_SIZE;
-    Serial.println("=== Triggered Window (raw values) ===");
-    for (size_t i = 0; i < BUFFER_SIZE; ++i)
-    {
-        size_t idx = (start + i) % BUFFER_SIZE;
-        Serial.print(printingBuffer[idx]);
-        if (printingBuffer[idx] > 4095)
-        {
-            Serial.print("[ERR]");
-        }
-        Serial.print(", ");
-        delay(2);
-    }
-    Serial.println("=== End Window ===");
-}
+    xSemaphoreTake(bufferMutex, portMAX_DELAY);
 
+    char buffer[128];
+    size_t start = (triggerIndex + BUFFER_SIZE - HALF_WINDOW) % BUFFER_SIZE;
+
+    // Print header once with longer delay
+    Serial.println(F("\n----START DEBUG INFO----"));
+    Serial.printf("Core: %d, Trigger: %d, Size: %d\n",
+                  xPortGetCoreID(), triggerIndex, BUFFER_SIZE);
+    delay(10);
+    Serial.flush();
+    Serial.println(F("=== Triggered Window (raw values) ==="));
+    Serial.flush();
+    delay(50); // One longer delay after header
+
+    // Print 10 values per line with fewer Serial calls
+    for (size_t i = 0; i < BUFFER_SIZE; i += 10)
+    {
+        int len = 0;
+        for (size_t j = 0; j < 10 && (i + j) < BUFFER_SIZE; j++)
+        {
+            size_t idx = (start + i + j) % BUFFER_SIZE;
+            if (printingBuffer[idx] > 4095)
+            {
+                Serial.print("[ERR]");
+            }
+            len += sprintf(buffer + len, "%d, ", printingBuffer[idx]); // Changed format to use comma + space
+        }
+        buffer[len] = '\n';
+        buffer[len + 1] = '\0';
+
+        Serial.print(buffer);
+        delay(20); // Larger delay between lines, but fewer total delays
+    }
+    delay(20);
+    Serial.println(F("=== End Window ==="));
+    delay(20);
+    Serial.flush();
+
+    xSemaphoreGive(bufferMutex);
+}
 void loop()
 {
     // delay(10000); // Just to avoid busy loop, can be removed or adjusted
@@ -250,4 +316,27 @@ void printingTask(void *pvParameters)
         }
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
+}
+
+// - printing debugging helper functions:
+
+// Add these helper functions
+void clearSerialBuffer()
+{
+    while (Serial.available())
+    {
+        Serial.read();
+    }
+}
+
+bool isSerialBufferFull()
+{
+    return Serial.availableForWrite() == 0;
+}
+
+void waitForSerialToClear()
+{
+    Serial.flush();
+    delay(10);
+    clearSerialBuffer();
 }
