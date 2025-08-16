@@ -16,6 +16,7 @@
 #include "soc/spi_struct.h"
 #include "esp_task_wdt.h" // for esp_task_wdt_deinit() function
 
+#define DEBUG 0 // Debug prints enabled
 #define CS_PIN 10
 #define SCLK_PIN 12
 #define MISO_PIN 13
@@ -24,7 +25,7 @@
 
 #define BUFFER_SIZE (1 * 1000)         // 1M samples for MVP - CHANGE if NEEDED - chaged to 1000
 #define SAMPLE_RATE 3000000            // 3 MSPS
-#define SAMPLE_T 2000                  // trigger voltage threshold - CHANGE if NEEDED
+#define SAMPLE_T 1000                  // trigger voltage threshold - CHANGE if NEEDED
 #define CAPTURE_SIZE (BUFFER_SIZE / 2) // total samples to save on trigger
 #define SPI_HZ 48000000                // SPI clock speed
 
@@ -94,7 +95,9 @@ void IRAM_ATTR adcTask(void *pvParameters)
             triggerIndex = writeIndex;
             pre_trigger_samples = 0; // reset pre-trigger samples
             samplesAfterTrigger = 0;
-            Serial.printf("Trigger at idx=%u raw=%u\n", (unsigned)triggerIndex, data);
+            if(DEBUG) {
+                Serial.printf("Trigger at idx=%u raw=%u\n", (unsigned)triggerIndex, data);
+            }
         }
 
         if (triggered && !captureReady)
@@ -253,9 +256,11 @@ void printCapture()
     size_t start = (triggerIndex + BUFFER_SIZE - HALF_WINDOW) % BUFFER_SIZE;
 
     // Print header once with longer delay
-    Serial.println(F("\n----START DEBUG INFO----"));
-    Serial.printf("Core: %d, Trigger: %d, Size: %d\n",
-                  xPortGetCoreID(), triggerIndex, BUFFER_SIZE);
+    if (DEBUG) {
+        Serial.println(F("\n----START DEBUG INFO----"));
+        Serial.printf("Core: %d, Trigger: %d, Size: %d\n",
+                    xPortGetCoreID(), triggerIndex, BUFFER_SIZE);
+    }
     delay(10);
     Serial.flush();
     Serial.println(F("=== Triggered Window (raw values) ==="));

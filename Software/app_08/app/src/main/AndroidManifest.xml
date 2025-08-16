@@ -1,0 +1,38 @@
+<manifest package="com.example.app_08"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+<!--    <uses-feature android:name="android.hardware.usb.host" android:required="false"/>-->
+<!--    <uses-permission android:name="android.permission.USB_PERMISSION" />-->
+    <uses-feature android:name="android.hardware.usb.host" />
+    <uses-permission android:name="android.permission.USB_PERMISSION" />
+
+
+<!--    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />-->
+<!--    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="28" />-->
+
+    <application
+        android:allowBackup="true"
+        android:label="app_08"
+        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        <activity android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"/>
+
+            </intent-filter>
+            <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
+        </activity>
+
+        <!-- optional: a usb device filter can be added here if you want to auto match vendors -->
+    </application>
+    <queries>
+        <intent>
+            <action android:name="com.example.app_08.USB_PERMISSION" />
+        </intent>
+    </queries>
+
+</manifest>
+
