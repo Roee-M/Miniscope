@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.graphics.Color;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
@@ -30,6 +31,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+
 
 public class MainActivity extends AppCompatActivity {
 
@@ -110,7 +112,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float voltage = (progress / 4095f) * 3.3f;
-                textViewThreshold.setText(String.format("V Threshold: %.2f V", voltage));
+                textViewThreshold.setText(String.format("V Threshold: %.2f V", (double)voltage));
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -147,7 +149,7 @@ public class MainActivity extends AppCompatActivity {
         lineChart.setData(new LineData());
         lineChart.getXAxis().setPosition(XAxis.XAxisPosition.BOTTOM);
         lineChart.getAxisLeft().setAxisMinimum(0);
-        lineChart.getAxisLeft().setAxisMaximum(4095);
+        lineChart.getAxisLeft().setAxisMaximum(4);
         lineChart.getAxisRight().setEnabled(false);
     }
 
@@ -156,6 +158,8 @@ public class MainActivity extends AppCompatActivity {
         sampleCount = 0;
         maxSample = 0;
         minSample = 4095;
+        sampleBuffer.clear();
+
         lineChart.clear();
         textViewStats.setText("Stats: ");
         textViewData.setText("");
@@ -200,15 +204,44 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private final List<Float> sampleBuffer = new ArrayList<>();
+    private final Object bufferLock = new Object(); // to avoid race conditions
+    private static final int BUFFER_SIZE = 1000;
+    private final circularBuffer circularBuffer = new circularBuffer(BUFFER_SIZE);
     private void readSerial() {
         byte[] buffer = new byte[1024];
+        StringBuilder partialLine = new StringBuilder();
+
         while (serialPort != null) {
             try {
                 int numBytes = serialPort.read(buffer, 100);
                 if (numBytes > 0) {
                     String data = new String(buffer, 0, numBytes, StandardCharsets.UTF_8);
-                    Log.d("Serial", "Got: " + data.replace("\n", "\\n").replace("\r", "\\r"));
-                    runOnUiThread(() -> updateUI(data));
+                    partialLine.append(data);
+
+                    // process complete lines
+                    int newlineIndex;
+                    while ((newlineIndex = partialLine.indexOf("\n")) >= 0) {
+                        String line = partialLine.substring(0, newlineIndex).trim();
+                        partialLine.delete(0, newlineIndex + 1);
+
+                        if (!line.isEmpty()) {
+                            for (String num : line.split("\\s*,\\s*")) {
+                                try {
+                                    int val = Integer.parseInt(num);
+                                    if (val >= 0 && val <= 4095) {
+                                        synchronized (bufferLock) {
+                                            float v_sample = (val / 4095.0f) * 3.3f; // convert to volts
+                                            sampleBuffer.add(v_sample);
+                                        }
+                                    }
+                                } catch (NumberFormatException ignored) {}
+                            }
+                        }
+                    }
+
+                    // update UI after new data arrived
+                    runOnUiThread(this::updateUI);
                 }
             } catch (IOException e) {
                 runOnUiThread(() -> updateConnectionStatus("Disconnected"));
@@ -217,6 +250,54 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
+
+    private void updateUI() {
+        List<Entry> entries = new ArrayList<>();
+        float maxVal = 0;
+        float minVal = 4;
+
+        synchronized (bufferLock) {
+            for (int i = 0; i < sampleBuffer.size(); i++) {
+                float val = sampleBuffer.get(i);
+                entries.add(new Entry(i, val));
+                if (val > maxVal) maxVal = val;
+                if (val < minVal) minVal = val;
+            }
+        }
+
+        LineDataSet dataSet = new LineDataSet(entries, "ADC Data");
+        dataSet.setDrawCircles(false);
+        dataSet.setDrawValues(false);
+        dataSet.setLineWidth(2f);
+        dataSet.setColor(Color.RED);
+        lineChart.setData(new LineData(dataSet));
+        lineChart.invalidate();
+
+        textViewStats.setText(String.format(
+                "Samples=%d  Max=%.00f  Min=%.00f  Pk-Pk=%.00f",
+                entries.size(), maxVal, minVal, maxVal - minVal
+        ));
+    }
+
+
+
+    private void updateUI(String data) {
+            for (String line : data.split("\n")) {
+                line = line.trim();
+                if (line.isEmpty()) continue;
+
+                String[] nums = line.split("\\s*,\\s*");
+                for (String num : nums) {
+                    if (num.isEmpty()) continue;
+                    try {
+                        int val = Integer.parseInt(num);
+                        if (val >= 0 && val <= 4095) {
+                            circularBuffer.add(val);
+                        }
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
 
     private void closeSerialPort() {
         if (serialPort != null) {
@@ -230,39 +311,25 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void updateUI(String data) {
-        for (String line : data.split("\n")) {
-            line = line.trim();
-            if (line.isEmpty()) continue; // skip empty lines
-
-            // Split by commas (allow spaces)
-            String[] nums = line.split("\\s*,\\s*");
-            for (String num : nums) {
-                if (num.isEmpty()) continue; // skip empty strings (from trailing commas)
-                try {
-                    int val = Integer.parseInt(num);
-                    if (val >= 0 && val <= 4095) {
-                        entries.add(new Entry(sampleCount++, val));
-                        if (val > maxSample) maxSample = val;
-                        if (val < minSample) minSample = val;
-                    }
-                } catch (NumberFormatException ignored) {}
-            }
-        }
-
-        updateChart();
-
-        textViewStats.setText(String.format(
-                "Stats: Samples=%d Max=%.0f Min=%.0f", sampleCount, maxSample, minSample));
-    }
 
     private void updateChart() {
+        float[] samples = circularBuffer.getData();
+        List<Entry> entries = new ArrayList<>();
+        for (int i = 0; i < samples.length; i++) {
+            entries.add(new Entry(i, samples[i]));
+        }
+
         LineDataSet dataSet = new LineDataSet(entries, "Signal");
         dataSet.setDrawCircles(false);
         dataSet.setDrawValues(false);
-        lineChart.setData(new LineData(dataSet));
+//        dataSet.setLineWidth(2f);
+        dataSet.setColor(Color.BLUE);
+
+        LineData lineData = new LineData(dataSet);
+        lineChart.setData(lineData);
         lineChart.invalidate();
     }
+
 
     private void updateConnectionStatus(String status) {
         runOnUiThread(() -> {
