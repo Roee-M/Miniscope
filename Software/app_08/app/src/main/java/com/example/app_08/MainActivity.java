@@ -31,6 +31,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import android.view.View;
+import android.content.res.Configuration;
 
 
 public class MainActivity extends AppCompatActivity {
@@ -146,11 +148,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupChart() {
-        lineChart.setData(new LineData());
+        lineChart.setBackgroundColor(Color.BLACK);
+
+        lineChart.setDrawGridBackground(true);
+        lineChart.setGridBackgroundColor(Color.BLACK);
+
         lineChart.getXAxis().setPosition(XAxis.XAxisPosition.BOTTOM);
+        lineChart.getXAxis().setTextColor(Color.WHITE);
+        lineChart.getXAxis().setDrawGridLines(true);
+        lineChart.getXAxis().setGridColor(Color.DKGRAY);
+
         lineChart.getAxisLeft().setAxisMinimum(0);
-        lineChart.getAxisLeft().setAxisMaximum(4);
+        lineChart.getAxisLeft().setAxisMaximum(3.3f); // V_REF
+        lineChart.getAxisLeft().setTextColor(Color.WHITE);
+        lineChart.getAxisLeft().setDrawGridLines(true);
+        lineChart.getAxisLeft().setGridColor(Color.DKGRAY);
+
         lineChart.getAxisRight().setEnabled(false);
+
+        lineChart.getLegend().setEnabled(false);
+        lineChart.getDescription().setEnabled(false);
     }
 
     private void resetGraph() {
@@ -252,52 +269,34 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateUI() {
-        List<Entry> entries = new ArrayList<>();
+        List<Entry> chartEntries = new ArrayList<>();
         float maxVal = 0;
         float minVal = 4;
 
         synchronized (bufferLock) {
-            for (int i = 0; i < sampleBuffer.size(); i++) {
+            int start = Math.max(0, sampleBuffer.size() - 500); // show last 500 samples
+            for (int i = start; i < sampleBuffer.size(); i++) {
                 float val = sampleBuffer.get(i);
-                entries.add(new Entry(i, val));
+                chartEntries.add(new Entry(i - start, val)); // X resets to 0 for scrolling effect
                 if (val > maxVal) maxVal = val;
                 if (val < minVal) minVal = val;
             }
         }
 
-        LineDataSet dataSet = new LineDataSet(entries, "ADC Data");
+        LineDataSet dataSet = new LineDataSet(chartEntries, "ADC Data");
         dataSet.setDrawCircles(false);
         dataSet.setDrawValues(false);
         dataSet.setLineWidth(2f);
         dataSet.setColor(Color.RED);
+
         lineChart.setData(new LineData(dataSet));
         lineChart.invalidate();
 
         textViewStats.setText(String.format(
-                "Samples=%d  Max=%.00f  Min=%.00f  Pk-Pk=%.00f",
-                entries.size(), maxVal, minVal, maxVal - minVal
+                "Samples=%d  Max=%.2f  Min=%.2f  Pk-Pk=%.2f",
+                chartEntries.size(), maxVal, minVal, maxVal - minVal
         ));
     }
-
-
-
-    private void updateUI(String data) {
-            for (String line : data.split("\n")) {
-                line = line.trim();
-                if (line.isEmpty()) continue;
-
-                String[] nums = line.split("\\s*,\\s*");
-                for (String num : nums) {
-                    if (num.isEmpty()) continue;
-                    try {
-                        int val = Integer.parseInt(num);
-                        if (val >= 0 && val <= 4095) {
-                            circularBuffer.add(val);
-                        }
-                    } catch (NumberFormatException ignored) {}
-                }
-            }
-        }
 
     private void closeSerialPort() {
         if (serialPort != null) {
@@ -311,26 +310,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-
-    private void updateChart() {
-        float[] samples = circularBuffer.getData();
-        List<Entry> entries = new ArrayList<>();
-        for (int i = 0; i < samples.length; i++) {
-            entries.add(new Entry(i, samples[i]));
-        }
-
-        LineDataSet dataSet = new LineDataSet(entries, "Signal");
-        dataSet.setDrawCircles(false);
-        dataSet.setDrawValues(false);
-//        dataSet.setLineWidth(2f);
-        dataSet.setColor(Color.BLUE);
-
-        LineData lineData = new LineData(dataSet);
-        lineChart.setData(lineData);
-        lineChart.invalidate();
-    }
-
-
     private void updateConnectionStatus(String status) {
         runOnUiThread(() -> {
             textViewConnection.setText(status);
@@ -339,6 +318,37 @@ public class MainActivity extends AppCompatActivity {
                     getResources().getColor(android.R.color.holo_red_dark);
             textViewConnection.setTextColor(color);
         });
+    }
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+
+        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            // hide controls, make chart full-screen
+            textViewData.setVisibility(View.GONE);
+            textViewStats.setVisibility(View.GONE);
+            seekBarThreshold.setVisibility(View.GONE);
+            buttonTrigger.setVisibility(View.GONE);
+            buttonReset.setVisibility(View.GONE);
+
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            );
+
+        } else {
+            // show controls in portrait
+            textViewData.setVisibility(View.VISIBLE);
+            textViewStats.setVisibility(View.VISIBLE);
+            seekBarThreshold.setVisibility(View.VISIBLE);
+            buttonTrigger.setVisibility(View.VISIBLE);
+            buttonReset.setVisibility(View.VISIBLE);
+
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+        }
+
+        lineChart.invalidate(); // redraw chart
     }
 
     @Override
