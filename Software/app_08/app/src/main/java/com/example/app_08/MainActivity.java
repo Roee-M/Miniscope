@@ -39,6 +39,10 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String ACTION_USB_PERMISSION = "com.example.app_08.USB_PERMISSION";
     private static final int BAUD_RATE = 115200;
+    private static final int WINDOW_SIZE = 500; // visible window in number of sample
+    private static final float SAMPLING_FREQ = 1_250_000f; // 1.25MHz sampling rate
+    private static final float SAMPLING_PERIOD = 1f/SAMPLING_FREQ; // 1.25MHz sampling rate
+    private static final float TRIGGER_INDEX = 1f/SAMPLING_FREQ; // 1.25MHz sampling rate
 
     UsbManager usbManager;
     UsbSerialPort serialPort;
@@ -149,26 +153,37 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupChart() {
         lineChart.setBackgroundColor(Color.BLACK);
-
         lineChart.setDrawGridBackground(true);
-        lineChart.setGridBackgroundColor(Color.BLACK);
-
+        lineChart.setGridBackgroundColor(Color.BLACK);   // keep grid background black
         lineChart.getXAxis().setPosition(XAxis.XAxisPosition.BOTTOM);
         lineChart.getXAxis().setTextColor(Color.WHITE);
         lineChart.getXAxis().setDrawGridLines(true);
         lineChart.getXAxis().setGridColor(Color.DKGRAY);
+        lineChart.getXAxis().setValueFormatter(new com.github.mikephil.charting.formatter.ValueFormatter() {
+            @Override
+            public String getAxisLabel(float value, com.github.mikephil.charting.components.AxisBase axis) {
+                return String.format("%.0f µs", value);
+            }
+        });
+
 
         lineChart.getAxisLeft().setAxisMinimum(0);
-        lineChart.getAxisLeft().setAxisMaximum(3.3f); // V_REF
+        lineChart.getAxisLeft().setAxisMaximum(3.3f);
         lineChart.getAxisLeft().setTextColor(Color.WHITE);
         lineChart.getAxisLeft().setDrawGridLines(true);
         lineChart.getAxisLeft().setGridColor(Color.DKGRAY);
 
         lineChart.getAxisRight().setEnabled(false);
-
         lineChart.getLegend().setEnabled(false);
         lineChart.getDescription().setEnabled(false);
+
+        // Enable zooming and scrolling
+        lineChart.setTouchEnabled(true);
+        lineChart.setDragEnabled(true);
+        lineChart.setScaleEnabled(true);
+        lineChart.setPinchZoom(false);
     }
+
 
     private void resetGraph() {
         entries.clear();
@@ -223,8 +238,7 @@ public class MainActivity extends AppCompatActivity {
 
     private final List<Float> sampleBuffer = new ArrayList<>();
     private final Object bufferLock = new Object(); // to avoid race conditions
-    private static final int BUFFER_SIZE = 1000;
-    private final circularBuffer circularBuffer = new circularBuffer(BUFFER_SIZE);
+
     private void readSerial() {
         byte[] buffer = new byte[1024];
         StringBuilder partialLine = new StringBuilder();
@@ -272,16 +286,18 @@ public class MainActivity extends AppCompatActivity {
         List<Entry> chartEntries = new ArrayList<>();
         float maxVal = 0;
         float minVal = 4;
+        int triggerIndex = sampleBuffer.size() / 2;
 
         synchronized (bufferLock) {
-            int start = Math.max(0, sampleBuffer.size() - 500); // show last 500 samples
-            for (int i = start; i < sampleBuffer.size(); i++) {
+            for (int i = 0; i < sampleBuffer.size(); i++) {
+                float time = (i - triggerIndex) * SAMPLING_PERIOD * 1_000_000f; // time in µs
                 float val = sampleBuffer.get(i);
-                chartEntries.add(new Entry(i - start, val)); // X resets to 0 for scrolling effect
+                chartEntries.add(new Entry(time, val));
                 if (val > maxVal) maxVal = val;
                 if (val < minVal) minVal = val;
             }
         }
+
 
         LineDataSet dataSet = new LineDataSet(chartEntries, "ADC Data");
         dataSet.setDrawCircles(false);
@@ -289,7 +305,15 @@ public class MainActivity extends AppCompatActivity {
         dataSet.setLineWidth(2f);
         dataSet.setColor(Color.RED);
 
-        lineChart.setData(new LineData(dataSet));
+        LineData lineData = new LineData(dataSet);
+        lineChart.setData(lineData);
+
+        // Show only the last WINDOW_SIZE samples initially
+        if (chartEntries.size() > WINDOW_SIZE) {
+            lineChart.setVisibleXRangeMaximum(WINDOW_SIZE);
+            lineChart.moveViewToX(chartEntries.size() - WINDOW_SIZE*1.5f);
+        }
+
         lineChart.invalidate();
 
         textViewStats.setText(String.format(
@@ -350,6 +374,7 @@ public class MainActivity extends AppCompatActivity {
 
         lineChart.invalidate(); // redraw chart
     }
+
 
     @Override
     protected void onDestroy() {
