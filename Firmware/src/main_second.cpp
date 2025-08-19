@@ -257,13 +257,13 @@ void printCapture()
 
     // Print header once with longer delay
     if (DEBUG) {
-        Serial.println(F("\n----START DEBUG INFO----"));
+        Serial.println(F("\n----DEBUG INFO----"));
         Serial.printf("Core: %d, Trigger: %d, Size: %d\n",
                     xPortGetCoreID(), triggerIndex, BUFFER_SIZE);
     }
     delay(10);
     Serial.flush();
-    Serial.println(F("=== Triggered Window (raw values) ==="));
+    Serial.println(F("START"));
     Serial.flush();
     delay(50); // One longer delay after header
 
@@ -287,7 +287,7 @@ void printCapture()
         delay(20); // Larger delay between lines, but fewer total delays
     }
     delay(20);
-    Serial.println(F("=== End Window ==="));
+    Serial.println(F("END"));
     delay(20);
     Serial.flush();
 

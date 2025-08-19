@@ -34,6 +34,9 @@ import java.util.List;
 import android.view.View;
 import android.content.res.Configuration;
 
+import org.jtransforms.fft.DoubleFFT_1D; // for FFT calculations
+
+
 
 public class MainActivity extends AppCompatActivity {
 
@@ -48,7 +51,7 @@ public class MainActivity extends AppCompatActivity {
     UsbSerialPort serialPort;
     PendingIntent permissionIntent;
 
-    TextView textViewData, textViewThreshold, textViewStats, textViewConnection;
+    TextView textViewThreshold, textViewStats, textViewConnection;
     LineChart lineChart;
     SeekBar seekBarThreshold;
     Button buttonTrigger, buttonReset;
@@ -57,6 +60,8 @@ public class MainActivity extends AppCompatActivity {
     int sampleCount = 0;
     float maxSample = 0;
     float minSample = 4095;
+    private static final int BUFFER_SIZE = 1000;
+    private int sampleIndex = 0;
 
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
@@ -102,7 +107,6 @@ public class MainActivity extends AppCompatActivity {
         );
 
         // Initialize UI
-        textViewData = findViewById(R.id.textViewData);
         textViewThreshold = findViewById(R.id.textViewThreshold);
         textViewStats = findViewById(R.id.textViewStats);
         textViewConnection = findViewById(R.id.textViewConnection);
@@ -190,11 +194,11 @@ public class MainActivity extends AppCompatActivity {
         sampleCount = 0;
         maxSample = 0;
         minSample = 4095;
-        sampleBuffer.clear();
-
+        synchronized (bufferLock) {
+            sampleBuffer.clear();
+        }
         lineChart.clear();
         textViewStats.setText("Stats: ");
-        textViewData.setText("");
     }
 
     private void detectDevice() {
@@ -262,8 +266,7 @@ public class MainActivity extends AppCompatActivity {
                                     int val = Integer.parseInt(num);
                                     if (val >= 0 && val <= 4095) {
                                         synchronized (bufferLock) {
-                                            float v_sample = (val / 4095.0f) * 3.3f; // convert to volts
-                                            sampleBuffer.add(v_sample);
+                                            handleIncomingSample(val);
                                         }
                                     }
                                 } catch (NumberFormatException ignored) {}
@@ -282,6 +285,22 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+
+    private void handleIncomingSample(int sample) {
+        if (sampleIndex == 0) {
+            // New buffer just started
+            resetGraph();
+        }
+
+        float v_sample = (sample / 4095.0f) * 3.3f; // convert to volts
+        sampleBuffer.add(v_sample);
+
+        sampleIndex++;
+        if (sampleIndex >= BUFFER_SIZE) {
+            // Completed one buffer from trigger
+            sampleIndex = 0;
+        }
+    }
     private void updateUI() {
         List<Entry> chartEntries = new ArrayList<>();
         float maxVal = 0;
@@ -315,11 +334,18 @@ public class MainActivity extends AppCompatActivity {
         }
 
         lineChart.invalidate();
+        double fSig = SignalAnalyzer.estimateFrequencyFFT(sampleBuffer, SAMPLING_FREQ);
+        String fStr = Double.isNaN(fSig) ? "—" : String.format("%.1f Hz", fSig);
 
         textViewStats.setText(String.format(
-                "Samples=%d  Max=%.2f  Min=%.2f  Pk-Pk=%.2f",
-                chartEntries.size(), maxVal, minVal, maxVal - minVal
-        ));
+                "Samples=%d  Max=%.2f  Min=%.2f  Pk-Pk=%.2f  Fs=%.2f MHz  Fsig=%s",
+                chartEntries.size(), maxVal, minVal, maxVal - minVal,
+                SAMPLING_FREQ / 1_000_000f, fStr));
+
+//        textViewStats.setText(String.format(
+//                "Samples=%d  Max=%.2f  Min=%.2f  Pk-Pk=%.2f",
+//                chartEntries.size(), maxVal, minVal, maxVal - minVal
+//        ));
     }
 
     private void closeSerialPort() {
@@ -349,7 +375,6 @@ public class MainActivity extends AppCompatActivity {
 
         if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
             // hide controls, make chart full-screen
-            textViewData.setVisibility(View.GONE);
             textViewStats.setVisibility(View.GONE);
             seekBarThreshold.setVisibility(View.GONE);
             buttonTrigger.setVisibility(View.GONE);
@@ -363,7 +388,6 @@ public class MainActivity extends AppCompatActivity {
 
         } else {
             // show controls in portrait
-            textViewData.setVisibility(View.VISIBLE);
             textViewStats.setVisibility(View.VISIBLE);
             seekBarThreshold.setVisibility(View.VISIBLE);
             buttonTrigger.setVisibility(View.VISIBLE);

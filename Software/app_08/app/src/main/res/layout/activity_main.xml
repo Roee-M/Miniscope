@@ -17,18 +17,10 @@
         android:textColor="#FF0000"
         android:layout_marginBottom="8dp" />
 
-    <TextView
-        android:id="@+id/textViewData"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Serial Output"
-        android:textSize="14sp"
-        android:scrollbars="vertical" />
-
     <com.github.mikephil.charting.charts.LineChart
         android:id="@+id/lineChart"
         android:layout_width="match_parent"
-        android:layout_height="250dp"
+        android:layout_height="261dp"
         android:layout_marginTop="8dp" />
 
     <LinearLayout
@@ -68,9 +60,9 @@
     <TextView
         android:id="@+id/textViewStats"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Stats: "
-        android:layout_marginTop="8dp" />
+        android:layout_height="58dp"
+        android:layout_marginTop="8dp"
+        android:text="Stats: " />
 
 </LinearLayout>
 
