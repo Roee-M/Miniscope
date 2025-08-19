@@ -46,6 +46,8 @@ public class MainActivity extends AppCompatActivity {
     private static final float SAMPLING_FREQ = 1_250_000f; // 1.25MHz sampling rate
     private static final float SAMPLING_PERIOD = 1f/SAMPLING_FREQ; // 1.25MHz sampling rate
     private static final float TRIGGER_INDEX = 1f/SAMPLING_FREQ; // 1.25MHz sampling rate
+    private static final int MAX_SAMPLE_VALUE_12_BIT_ADC = 4096;
+    private static final float V_REF = 3.3f;
 
     UsbManager usbManager;
     UsbSerialPort serialPort;
@@ -62,7 +64,7 @@ public class MainActivity extends AppCompatActivity {
     float minSample = 4095;
     private static final int BUFFER_SIZE = 1000;
     private int sampleIndex = 0;
-
+    float v_threshold = 0;
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -121,8 +123,8 @@ public class MainActivity extends AppCompatActivity {
         seekBarThreshold.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                float voltage = (progress / 4095f) * 3.3f;
-                textViewThreshold.setText(String.format("V Threshold: %.2f V", (double)voltage));
+                v_threshold = (progress / 4095f) * 3.3f;
+                textViewThreshold.setText(String.format("V Threshold: %.2f V", (double)v_threshold));
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -134,6 +136,9 @@ public class MainActivity extends AppCompatActivity {
             if (serialPort != null) {
                 try {
                     serialPort.write("TRIGGER\n".getBytes(StandardCharsets.UTF_8), 1000);
+                    int v_threshold_sample_value = (int)((v_threshold * MAX_SAMPLE_VALUE_12_BIT_ADC) / V_REF);
+                    String v_threshold_command = "V_THRESHOLD=" + v_threshold_sample_value + "\n";
+                    serialPort.write(v_threshold_command.getBytes(StandardCharsets.UTF_8), 1000);
                 } catch (IOException e) {
                     Toast.makeText(this, "Failed to send trigger command", Toast.LENGTH_SHORT).show();
                     Log.e("MainActivity", "Trigger error", e);

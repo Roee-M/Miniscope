@@ -1,8 +1,8 @@
 
 
-/* 06/08/2025 - ADC Sampling with Serial print
+/* 19/08/2025 - ADC Sampling with Serial print, and app communication
     - fastest sampling logic - bare minimum
-    - 1.27MSPS
+    - 1.27MSPS - TODO: Verify sampling speed
     - double buffer for printing , both buffers in PSRAM
     - manual trigger reset button
     - formated printing in chunks, no grubled data
@@ -21,11 +21,11 @@
 #define SCLK_PIN 12
 #define MISO_PIN 13
 #define VREF 3.3
-#define TRIGGER_PIN 0 // Pin for manually triggering
+#define RESET_TRIGGER_PIN 0 // Pin for manually triggering
 
 #define BUFFER_SIZE (1 * 1000)         // 1M samples for MVP - CHANGE if NEEDED - chaged to 1000
 #define SAMPLE_RATE 3000000            // 3 MSPS
-#define SAMPLE_T 1000                  // trigger voltage threshold - CHANGE if NEEDED
+// #define SAMPLE_T 1000                  // trigger voltage threshold - CHANGE if NEEDED
 #define CAPTURE_SIZE (BUFFER_SIZE / 2) // total samples to save on trigger
 #define SPI_HZ 48000000                // SPI clock speed
 
@@ -52,6 +52,8 @@ bool button_pressed = false; // for manual trigger reset
 volatile uint16_t data;
 SPIClass SPI_ADC(FSPI); // Use FSPI for ESP32-S3
 
+volatile int sample_v_threshold = 0;
+volatile bool serialTriggerRequested = false;
 volatile bool printed = false;   // Flag to indicate if capture has been printed
 uint16_t *printingBuffer = NULL; // Buffer for printing capture data
 
@@ -89,13 +91,14 @@ void IRAM_ATTR adcTask(void *pvParameters)
             pre_trigger_samples++;
         }
 
-        if (!triggered && data > SAMPLE_T && pre_trigger_samples >= HALF_WINDOW)
+        if (!triggered && data > sample_v_threshold && pre_trigger_samples >= HALF_WINDOW)
         {
             triggered = true;
             triggerIndex = writeIndex;
             pre_trigger_samples = 0; // reset pre-trigger samples
             samplesAfterTrigger = 0;
-            if(DEBUG) {
+            if (DEBUG)
+            {
                 Serial.printf("Trigger at idx=%u raw=%u\n", (unsigned)triggerIndex, data);
             }
         }
@@ -120,10 +123,11 @@ void IRAM_ATTR adcTask(void *pvParameters)
         writeIndex = (writeIndex + 1) % BUFFER_SIZE;
 
         // Manual trigger reset button - after pressing waiting for (Voltage > V_T) sample > SAMPLE_T
-        if (digitalRead(TRIGGER_PIN) == LOW && !button_pressed)
+        if (digitalRead(RESET_TRIGGER_PIN) == LOW && !button_pressed || serialTriggerRequested)
         {
             xSemaphoreTake(bufferMutex, portMAX_DELAY);
             button_pressed = true; // Set flag to prevent multiple resets
+            serialTriggerRequested = false;
             triggered = false;
             captureReady = false;
             pre_trigger_samples = 0;
@@ -164,7 +168,7 @@ void setup()
     SPI2->ms_dlen.ms_data_bitlen = 15;
     SPI2->cmd.update = 1;
     while (SPI2->cmd.update)
-    delay(1000); // wait for serial to be ready
+        delay(1000); // wait for serial to be ready
     Serial.println("allocating ring buffer");
     // ringBuffer = (uint16_t *)malloc(BUFFER_SIZE * sizeof(uint16_t));
     ringBuffer = (uint16_t *)ps_malloc(BUFFER_SIZE * sizeof(uint16_t));
@@ -187,12 +191,13 @@ void setup()
     if (!bufferMutex)
     {
         Serial.println("Failed to create buffer mutex!");
-        while (true);
+        while (true)
+            ;
     }
     Serial.println("bufferMutex created successfully");
 
     // --- setup trigger pin ---
-    pinMode(TRIGGER_PIN, INPUT_PULLUP);
+    pinMode(RESET_TRIGGER_PIN, INPUT_PULLUP);
 
     Serial.println("---finished setup---");
 
@@ -256,10 +261,11 @@ void printCapture()
     size_t start = (triggerIndex + BUFFER_SIZE - HALF_WINDOW) % BUFFER_SIZE;
 
     // Print header once with longer delay
-    if (DEBUG) {
+    if (DEBUG)
+    {
         Serial.println(F("\n----DEBUG INFO----"));
         Serial.printf("Core: %d, Trigger: %d, Size: %d\n",
-                    xPortGetCoreID(), triggerIndex, BUFFER_SIZE);
+                      xPortGetCoreID(), triggerIndex, BUFFER_SIZE);
     }
     delay(10);
     Serial.flush();
@@ -315,6 +321,24 @@ void printingTask(void *pvParameters)
     Serial.println("Printing Task started");
     while (1)
     {
+        if (Serial.available())
+        {
+            String cmd = Serial.readStringUntil('\n'); // read line
+            cmd.trim();
+            if (cmd.equalsIgnoreCase("TRIGGER"))
+            {
+                xSemaphoreTake(bufferMutex, portMAX_DELAY);
+                serialTriggerRequested = true;
+                Serial.println("Serial trigger requested!");
+                xSemaphoreGive(bufferMutex);
+            }
+            if (cmd.startsWith("V_THRESHOLD=")) {
+                int newThresh = cmd.substring(12).toInt();
+
+                sample_v_threshold = newThresh;
+                Serial.printf("Threshold updated to %d\n", sample_v_threshold);
+            }
+        }
         if (captureReady && !printed)
         {
             printed = true; // Set flag to indicate capture has been printed
