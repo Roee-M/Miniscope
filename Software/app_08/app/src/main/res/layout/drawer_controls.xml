@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/drawerTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Miniscope Settings"
+            android:textStyle="bold"
+            android:textSize="18sp"
+            android:paddingBottom="12dp" />
+
+        <!-- V_threshold -->
+        <TextView
+            android:id="@+id/textViewDrawerThreshold"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="V Threshold: 0.00 V"
+            android:paddingTop="8dp" />
+
+        <SeekBar
+            android:id="@+id/seekBarDrawerThreshold"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="4095" />
+
+        <!-- Show stats toggle -->
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switchShowStats"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Show stats on graph"
+            android:checked="true"
+            android:paddingTop="16dp" />
+
+        <!-- Trigger type -->
+        <TextView
+            android:id="@+id/textViewTriggerType"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Trigger type"
+            android:paddingTop="16dp" />
+
+        <RadioGroup
+            android:id="@+id/radioGroupTrigger"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/radioFalling"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Falling"
+                android:checked="false" />
+
+            <RadioButton
+                android:id="@+id/radioRising"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Rising"
+                android:checked="true" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/textViewBaudRate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Baud Rate"
+            android:paddingTop="16dp" />
+
+        <Spinner
+            android:id="@+id/spinnerBaudRate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:entries="@array/baud_rates"
+            android:spinnerMode="dropdown"/>
+        <TextView
+            android:id="@+id/textViewBufferSize"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Buffer Size"
+            android:paddingTop="16dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <EditText
+                android:id="@+id/editTextBufferSize"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Enter buffer size"
+                android:inputType="number"
+                android:text="1000" />
+
+            <Button
+                android:id="@+id/buttonSetBufferSize"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Set" />
+        </LinearLayout>
+
+
+    </LinearLayout>
+
+</ScrollView>

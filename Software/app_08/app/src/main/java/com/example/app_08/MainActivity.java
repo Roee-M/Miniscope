@@ -11,8 +11,13 @@ import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
+import android.content.res.Configuration;
+import android.widget.AdapterView;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.SeekBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -31,21 +36,29 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import android.view.View;
-import android.content.res.Configuration;
 
-import org.jtransforms.fft.DoubleFFT_1D; // for FFT calculations
+import org.jtransforms.fft.DoubleFFT_1D;
 
-
+import androidx.activity.OnBackPressedCallback;
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.ActionBarDrawerToggle;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.GravityCompat;
+import androidx.drawerlayout.widget.DrawerLayout;
+import android.os.Bundle;
+import android.view.MenuItem;
+import android.widget.Toast;
+import androidx.appcompat.widget.Toolbar;
+import com.google.android.material.navigation.NavigationView;
+import android.widget.RadioGroup;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String ACTION_USB_PERMISSION = "com.example.app_08.USB_PERMISSION";
-    private static final int BAUD_RATE = 115200;
-    private static final int WINDOW_SIZE = 500; // visible window in number of sample
-    private static final float SAMPLING_FREQ = 1_250_000f; // 1.25MHz sampling rate
-    private static final float SAMPLING_PERIOD = 1f/SAMPLING_FREQ; // 1.25MHz sampling rate
-    private static final float TRIGGER_INDEX = 1f/SAMPLING_FREQ; // 1.25MHz sampling rate
+    private static int BAUD_RATE = 115200;
+    private static final int WINDOW_SIZE = 500;
+    private static final float SAMPLING_FREQ = 1_250_000f;
+    private static final float SAMPLING_PERIOD = 1f/SAMPLING_FREQ;
     private static final int MAX_SAMPLE_VALUE_12_BIT_ADC = 4096;
     private static final float V_REF = 3.3f;
 
@@ -62,7 +75,7 @@ public class MainActivity extends AppCompatActivity {
     int sampleCount = 0;
     float maxSample = 0;
     float minSample = 4095;
-    private static final int BUFFER_SIZE = 1000;
+    private static int BUFFER_SIZE = 1000;
     private int sampleIndex = 0;
     float v_threshold = 0;
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
@@ -97,6 +110,14 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    // ADDED: Variables for the side menu
+    private DrawerLayout drawerLayout;
+    private ActionBarDrawerToggle actionBarDrawerToggle;
+    private NavigationView navigationView;
+    private Toolbar toolbar;
+    private TextView drawerThresholdTextView;
+    private SeekBar drawerThresholdSeekBar;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -117,14 +138,112 @@ public class MainActivity extends AppCompatActivity {
         buttonTrigger = findViewById(R.id.buttonTrigger);
         buttonReset = findViewById(R.id.buttonReset);
 
+        // MODIFIED: Initializing and setting up the side menu components
+        drawerLayout = findViewById(R.id.drawer_layout);
+        toolbar = findViewById(R.id.toolbar);
+        navigationView = findViewById(R.id.navigationView); // Corrected ID
+        setSupportActionBar(toolbar);
+
+        actionBarDrawerToggle = new ActionBarDrawerToggle(
+                this,
+                drawerLayout,
+                toolbar,
+                R.string.open_drawer,
+                R.string.close_drawer
+        );
+        drawerLayout.addDrawerListener(actionBarDrawerToggle);
+        actionBarDrawerToggle.syncState();
+
+        // Initialize the controls from the drawer layout
+        View headerView = navigationView.getHeaderView(0);
+        drawerThresholdTextView = headerView.findViewById(R.id.textViewDrawerThreshold);
+        drawerThresholdSeekBar = headerView.findViewById(R.id.seekBarDrawerThreshold);
+        // ADDED: Initialize the RadioGroup from the drawer header
+        RadioGroup radioGroupTrigger = headerView.findViewById(R.id.radioGroupTrigger);
+        radioGroupTrigger.setOnCheckedChangeListener((group, checkedId) -> {
+            String command;
+            if (checkedId == R.id.radioRising) {
+                command = "TYPE=RISING\n";
+            } else {
+                command = "TYPE=FALLING\n";
+            }
+            if (serialPort != null) {
+                try {
+                    serialPort.write(command.getBytes(StandardCharsets.UTF_8), 1000);
+                    Toast.makeText(this, "Trigger type set to: " + (checkedId == R.id.radioRising ? "Rising" : "Falling"), Toast.LENGTH_SHORT).show();
+                } catch (IOException e) {
+                    Toast.makeText(this, "Failed to set trigger type", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+
+        // ADDED: Initialize the Baud Rate Spinner
+        Spinner spinnerBaudRate = headerView.findViewById(R.id.spinnerBaudRate);
+        spinnerBaudRate.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                int newBaudRate = Integer.parseInt(parent.getItemAtPosition(position).toString());
+                if (newBaudRate != BAUD_RATE) {
+                    changeBaudRate(newBaudRate);
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+                // Do nothing
+            }
+        });
+        // ADDED: Initialize the Buffer Size controls
+        EditText editTextBufferSize = headerView.findViewById(R.id.editTextBufferSize);
+        Button buttonSetBufferSize = headerView.findViewById(R.id.buttonSetBufferSize);
+
+        // Set the initial value in the EditText to the current BUFFER_SIZE
+        editTextBufferSize.setText(String.valueOf(BUFFER_SIZE));
+
+        buttonSetBufferSize.setOnClickListener(v -> {
+            try {
+                int newBufferSize = Integer.parseInt(editTextBufferSize.getText().toString());
+                if (newBufferSize > 0) {
+                    BUFFER_SIZE = newBufferSize;
+                    Toast.makeText(this, "Buffer size set to " + BUFFER_SIZE, Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(this, "Buffer size must be a positive number", Toast.LENGTH_SHORT).show();
+                }
+            } catch (NumberFormatException e) {
+                Toast.makeText(this, "Invalid buffer size", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // Set up the listener for the drawer's SeekBar
+        drawerThresholdSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float v_threshold_drawer = (progress / 4095f) * 3.3f;
+                drawerThresholdTextView.setText(String.format("V Threshold: %.2f V", (double)v_threshold_drawer));
+                v_threshold = v_threshold_drawer;
+                // You can add code here to update the main seekBar if needed
+                if (fromUser) {
+                    // This is the key line to add
+                    seekBarThreshold.setProgress(progress);
+                }
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
         setupChart();
 
-        // SeekBar listener
+        // MODIFIED: SeekBar listener with sync to drawer
         seekBarThreshold.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 v_threshold = (progress / 4095f) * 3.3f;
                 textViewThreshold.setText(String.format("V Threshold: %.2f V", (double)v_threshold));
+                // Sync the drawer's seekbar as well
+                if (fromUser) {
+                    drawerThresholdSeekBar.setProgress(progress);
+                }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -160,10 +279,20 @@ public class MainActivity extends AppCompatActivity {
         detectDevice();
     }
 
+    // ADDED: Override onBackPressed to close the drawer
+    @Override
+    public void onBackPressed() {
+        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START);
+        } else {
+            super.onBackPressed();
+        }
+    }
+
     private void setupChart() {
         lineChart.setBackgroundColor(Color.BLACK);
         lineChart.setDrawGridBackground(true);
-        lineChart.setGridBackgroundColor(Color.BLACK);   // keep grid background black
+        lineChart.setGridBackgroundColor(Color.BLACK);
         lineChart.getXAxis().setPosition(XAxis.XAxisPosition.BOTTOM);
         lineChart.getXAxis().setTextColor(Color.WHITE);
         lineChart.getXAxis().setDrawGridLines(true);
@@ -192,7 +321,6 @@ public class MainActivity extends AppCompatActivity {
         lineChart.setScaleEnabled(true);
         lineChart.setPinchZoom(false);
     }
-
 
     private void resetGraph() {
         entries.clear();
@@ -246,7 +374,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private final List<Float> sampleBuffer = new ArrayList<>();
-    private final Object bufferLock = new Object(); // to avoid race conditions
+    private final Object bufferLock = new Object();
 
     private void readSerial() {
         byte[] buffer = new byte[1024];
@@ -290,8 +418,12 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-
     private void handleIncomingSample(int sample) {
+        // If the buffer size has changed, clear the buffer and reset the index
+        if (sampleBuffer.size() > BUFFER_SIZE) {
+            sampleBuffer.clear();
+            sampleIndex = 0;
+        }
         if (sampleIndex == 0) {
             // New buffer just started
             resetGraph();
@@ -306,6 +438,7 @@ public class MainActivity extends AppCompatActivity {
             sampleIndex = 0;
         }
     }
+
     private void updateUI() {
         List<Entry> chartEntries = new ArrayList<>();
         float maxVal = 0;
@@ -322,7 +455,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-
         LineDataSet dataSet = new LineDataSet(chartEntries, "ADC Data");
         dataSet.setDrawCircles(false);
         dataSet.setDrawValues(false);
@@ -332,7 +464,6 @@ public class MainActivity extends AppCompatActivity {
         LineData lineData = new LineData(dataSet);
         lineChart.setData(lineData);
 
-        // Show only the last WINDOW_SIZE samples initially
         if (chartEntries.size() > WINDOW_SIZE) {
             lineChart.setVisibleXRangeMaximum(WINDOW_SIZE);
             lineChart.moveViewToX(chartEntries.size() - WINDOW_SIZE*1.5f);
@@ -346,11 +477,6 @@ public class MainActivity extends AppCompatActivity {
                 "Samples=%d  Max=%.2f  Min=%.2f  Pk-Pk=%.2f  Fs=%.2f MHz  Fsig=%s",
                 chartEntries.size(), maxVal, minVal, maxVal - minVal,
                 SAMPLING_FREQ / 1_000_000f, fStr));
-
-//        textViewStats.setText(String.format(
-//                "Samples=%d  Max=%.2f  Min=%.2f  Pk-Pk=%.2f",
-//                chartEntries.size(), maxVal, minVal, maxVal - minVal
-//        ));
     }
 
     private void closeSerialPort() {
@@ -365,6 +491,17 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void changeBaudRate(int newBaudRate) {
+        // This method handles closing the current serial port and reconnecting with the new baud rate.
+        if (serialPort != null) {
+            closeSerialPort();
+            BAUD_RATE = newBaudRate; // Update the class variable
+            detectDevice(); // Reconnect to the device
+        } else {
+            BAUD_RATE = newBaudRate;
+        }
+    }
+
     private void updateConnectionStatus(String status) {
         runOnUiThread(() -> {
             textViewConnection.setText(status);
@@ -374,12 +511,12 @@ public class MainActivity extends AppCompatActivity {
             textViewConnection.setTextColor(color);
         });
     }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
 
         if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            // hide controls, make chart full-screen
             textViewStats.setVisibility(View.GONE);
             seekBarThreshold.setVisibility(View.GONE);
             buttonTrigger.setVisibility(View.GONE);
@@ -392,7 +529,6 @@ public class MainActivity extends AppCompatActivity {
             );
 
         } else {
-            // show controls in portrait
             textViewStats.setVisibility(View.VISIBLE);
             seekBarThreshold.setVisibility(View.VISIBLE);
             buttonTrigger.setVisibility(View.VISIBLE);
@@ -401,9 +537,8 @@ public class MainActivity extends AppCompatActivity {
             getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
         }
 
-        lineChart.invalidate(); // redraw chart
+        lineChart.invalidate();
     }
-
 
     @Override
     protected void onDestroy() {

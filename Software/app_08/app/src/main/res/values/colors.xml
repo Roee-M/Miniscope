@@ -3,5 +3,6 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="Header">#5AA7CF</color>
+    <color name="Toolbar">#0E2E3E</color>
 
 </resources>
