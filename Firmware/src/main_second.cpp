@@ -7,9 +7,9 @@
     - manual trigger reset button
     - formated printing in chunks, no grubled data
     - using semphores only when capture ready copying and printing
-    - TEST: testing now for larger buffer size (10k) - seeing artifacts caused by manual CS toggeling
-    - added trigger type (rising/falling) and threshold setting over serial
-    - TODO: check prevData affects of actual trigger rising and falling on sampling rate
+    - tested larger buffer size (10k) - seeing artifacts caused by manual CS toggeling also on app
+    - added trigger type (rising/falling) and threshold setting over seria
+    - using prev data for edge detection - improve triggering accuracy but causing smaple rate 1.1594Mhz
  *
 */
 
@@ -102,45 +102,45 @@ void IRAM_ATTR adcTask(void *pvParameters)
             pre_trigger_samples++;
         }
 
-        if (!triggered && pre_trigger_samples >= HALF_WINDOW &&
-            ((triggerType == TRIGGER_RISING && data > sample_v_threshold) || (triggerType == TRIGGER_FALLING && data < sample_v_threshold)))
-        {
-            triggered = true;
-            triggerIndex = writeIndex;
-            pre_trigger_samples = 0; // reset pre-trigger samples
-            samplesAfterTrigger = 0;
-            if (DEBUG)
-            {
-                Serial.printf("Trigger at idx=%u raw=%u\n", (unsigned)triggerIndex, data);
-            }
-        }
-        // if (!triggered && pre_trigger_samples >= HALF_WINDOW)
+        // if (!triggered && pre_trigger_samples >= HALF_WINDOW &&
+        //     ((triggerType == TRIGGER_RISING && data > sample_v_threshold) || (triggerType == TRIGGER_FALLING && data < sample_v_threshold)))
         // {
-        //     if (triggerType == TRIGGER_RISING &&
-        //         prevData <= sample_v_threshold &&
-        //         data > sample_v_threshold)
+        //     triggered = true;
+        //     triggerIndex = writeIndex;
+        //     pre_trigger_samples = 0; // reset pre-trigger samples
+        //     samplesAfterTrigger = 0;
+        //     if (DEBUG)
         //     {
-        //         triggered = true;
-        //     }
-        //     else if (triggerType == TRIGGER_FALLING &&
-        //              prevData >= sample_v_threshold &&
-        //              data < sample_v_threshold)
-        //     {
-        //         triggered = true;
-        //     }
-
-        //     if (triggered)
-        //     {
-        //         triggerIndex = writeIndex;
-        //         pre_trigger_samples = 0;
-        //         samplesAfterTrigger = 0;
-        //         if (DEBUG)
-        //         {
-        //             Serial.printf("Trigger at idx=%u raw=%u\n",
-        //                           (unsigned)triggerIndex, data);
-        //         }
+        //         Serial.printf("Trigger at idx=%u raw=%u\n", (unsigned)triggerIndex, data);
         //     }
         // }
+        if (!triggered && pre_trigger_samples >= HALF_WINDOW)
+        {
+            if (triggerType == TRIGGER_RISING &&
+                prevData <= sample_v_threshold &&
+                data > sample_v_threshold)
+            {
+                triggered = true;
+            }
+            else if (triggerType == TRIGGER_FALLING &&
+                     prevData >= sample_v_threshold &&
+                     data < sample_v_threshold)
+            {
+                triggered = true;
+            }
+
+            if (triggered)
+            {
+                triggerIndex = writeIndex;
+                pre_trigger_samples = 0;
+                samplesAfterTrigger = 0;
+                if (DEBUG)
+                {
+                    Serial.printf("Trigger at idx=%u raw=%u\n",
+                                  (unsigned)triggerIndex, data);
+                }
+            }
+        }
 
         if (triggered && !captureReady)
         {
@@ -167,7 +167,7 @@ void IRAM_ATTR adcTask(void *pvParameters)
         }
 
         writeIndex = (writeIndex + 1) % BUFFER_SIZE;
-        // prevData = data;
+        prevData = data; // comment out if not needed for rising/falling detection
 
         // Manual trigger reset button - after pressing waiting for (Voltage > V_T) sample > SAMPLE_T
         if (digitalRead(RESET_TRIGGER_PIN) == LOW && !button_pressed || serialTriggerRequested)
