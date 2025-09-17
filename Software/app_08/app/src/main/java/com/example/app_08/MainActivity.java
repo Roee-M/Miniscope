@@ -1,5 +1,6 @@
 package com.example.app_08;
 
+import android.annotation.SuppressLint;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -11,6 +12,7 @@ import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.MotionEvent;
 import android.view.View;
 import android.content.res.Configuration;
 import android.widget.AdapterView;
@@ -28,6 +30,7 @@ import com.github.mikephil.charting.components.XAxis;
 import com.github.mikephil.charting.data.Entry;
 import com.github.mikephil.charting.data.LineData;
 import com.github.mikephil.charting.data.LineDataSet;
+import com.github.mikephil.charting.utils.MPPointD;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
@@ -43,6 +46,7 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.view.GravityCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import android.os.Bundle;
@@ -51,16 +55,21 @@ import android.widget.Toast;
 import androidx.appcompat.widget.Toolbar;
 import com.google.android.material.navigation.NavigationView;
 import android.widget.RadioGroup;
+import com.github.mikephil.charting.listener.OnChartValueSelectedListener;
+import com.github.mikephil.charting.highlight.Highlight;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String ACTION_USB_PERMISSION = "com.example.app_08.USB_PERMISSION";
-    private static int BAUD_RATE = 115200;
+    private static int BAUD_RATE = 921600; // default is now 921600 was 115200
     private static final int WINDOW_SIZE = 500;
-    private static final float SAMPLING_FREQ = 1_250_000f;
+    private static final float SAMPLING_FREQ = 1_231_000f;// was 1_250_000f; updated according to actual sampling freq
     private static final float SAMPLING_PERIOD = 1f/SAMPLING_FREQ;
     private static final int MAX_SAMPLE_VALUE_12_BIT_ADC = 4096;
     private static final float V_REF = 3.3f;
+
+    float cursorX = Float.NaN;
+    float cursorY = Float.NaN;
 
     UsbManager usbManager;
     UsbSerialPort serialPort;
@@ -75,7 +84,7 @@ public class MainActivity extends AppCompatActivity {
     int sampleCount = 0;
     float maxSample = 0;
     float minSample = 4095;
-    private static int BUFFER_SIZE = 1000;
+    private static int BUFFER_SIZE = 10000; // was 1000
     private int sampleIndex = 0;
     float v_threshold = 0;
     private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
@@ -117,6 +126,8 @@ public class MainActivity extends AppCompatActivity {
     private Toolbar toolbar;
     private TextView drawerThresholdTextView;
     private SeekBar drawerThresholdSeekBar;
+    TextView textViewCursor;
+    Button buttonHomeView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -130,6 +141,7 @@ public class MainActivity extends AppCompatActivity {
         );
 
         // Initialize UI
+//        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES); // for testing dark mode
         textViewThreshold = findViewById(R.id.textViewThreshold);
         textViewStats = findViewById(R.id.textViewStats);
         textViewConnection = findViewById(R.id.textViewConnection);
@@ -137,6 +149,8 @@ public class MainActivity extends AppCompatActivity {
         seekBarThreshold = findViewById(R.id.seekBarThreshold);
         buttonTrigger = findViewById(R.id.buttonTrigger);
         buttonReset = findViewById(R.id.buttonReset);
+        textViewCursor = findViewById(R.id.textViewCursor);
+        buttonHomeView = findViewById(R.id.buttonHomeView);
 
         // MODIFIED: Initializing and setting up the side menu components
         drawerLayout = findViewById(R.id.drawer_layout);
@@ -156,6 +170,26 @@ public class MainActivity extends AppCompatActivity {
 
         // Initialize the controls from the drawer layout
         View headerView = navigationView.getHeaderView(0);
+        Button drawerButtonTrigger = headerView.findViewById(R.id.drawerButtonTrigger);
+        Button drawerButtonReset = headerView.findViewById(R.id.drawerButtonReset);
+        Button drawerButtonHomeView = headerView.findViewById(R.id.drawerButtonHomeView);
+        // Drawer "Arm Capture" button
+        drawerButtonTrigger.setOnClickListener(v -> {
+            buttonTrigger.performClick(); // just reuse the existing handler
+            drawerLayout.closeDrawer(GravityCompat.START); // optional: auto-close drawer
+        });
+
+// Drawer "Clear Graph" button
+        drawerButtonReset.setOnClickListener(v -> {
+            buttonReset.performClick();
+            drawerLayout.closeDrawer(GravityCompat.START);
+        });
+
+// Drawer "Home View" button
+        drawerButtonHomeView.setOnClickListener(v -> {
+            buttonHomeView.performClick();
+            drawerLayout.closeDrawer(GravityCompat.START);
+        });
         drawerThresholdTextView = headerView.findViewById(R.id.textViewDrawerThreshold);
         drawerThresholdSeekBar = headerView.findViewById(R.id.seekBarDrawerThreshold);
         // ADDED: Initialize the RadioGroup from the drawer header
@@ -214,6 +248,14 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        buttonHomeView.setOnClickListener(v -> {
+            if (lineChart.getData() != null && lineChart.getData().getEntryCount() > 0) {
+                lineChart.fitScreen(); // resets zoom and pan
+                lineChart.moveViewToX(0f); // centers around x=0
+                lineChart.invalidate();
+            }
+        });
+
         // Set up the listener for the drawer's SeekBar
         drawerThresholdSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -227,6 +269,7 @@ public class MainActivity extends AppCompatActivity {
                     seekBarThreshold.setProgress(progress);
                 }
             }
+
 
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -289,6 +332,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private void setupChart() {
         lineChart.setBackgroundColor(Color.BLACK);
         lineChart.setDrawGridBackground(true);
@@ -303,8 +347,6 @@ public class MainActivity extends AppCompatActivity {
                 return String.format("%.0f µs", value);
             }
         });
-
-
         lineChart.getAxisLeft().setAxisMinimum(0);
         lineChart.getAxisLeft().setAxisMaximum(3.3f);
         lineChart.getAxisLeft().setTextColor(Color.WHITE);
@@ -320,6 +362,72 @@ public class MainActivity extends AppCompatActivity {
         lineChart.setDragEnabled(true);
         lineChart.setScaleEnabled(true);
         lineChart.setPinchZoom(false);
+
+
+        // 🔹 Add the cursor listener here:
+        lineChart.setOnChartValueSelectedListener(new OnChartValueSelectedListener() {
+            @Override
+            public void onValueSelected(Entry e, Highlight h) {
+                cursorX = e.getX();
+                cursorY = e.getY();
+                updateCursorText();
+            }
+
+            @Override
+            public void onNothingSelected() {
+                cursorX = Float.NaN;
+                cursorY = Float.NaN;
+                updateCursorText();
+            }
+        });
+//        // --- touch listener: convert touch pixel -> chart values, map to nearest sample index
+//        lineChart.setOnTouchListener((v, event) -> {
+//            // require data & at least one dataset
+//            if (lineChart.getData() == null || lineChart.getData().getDataSetCount() == 0) {
+//                return false;
+//            }
+//
+//            if (event.getAction() == MotionEvent.ACTION_DOWN || event.getAction() == MotionEvent.ACTION_MOVE) {
+//                try {
+//                    // get chart x/y values (data-space) from touch pixel coordinates
+//                    MPPointD values = lineChart.getTransformer(lineChart.getAxisLeft().getAxisDependency())
+//                            .getValuesByTouchPoint(event.getX(), event.getY());
+//                    double touchX = values.x; // in µs (because chart X entries use µs)
+//                    // map touchX to nearest sample index in sampleBuffer
+//                    synchronized (bufferLock) {
+//                        int size = sampleBuffer.size();
+//                        if (size > 0) {
+//                            int triggerIndex = size / 2;
+//                            float samplePeriodUs = SAMPLING_PERIOD * 1_000_000f;
+//                            double idxD = touchX / samplePeriodUs + triggerIndex;
+//                            int idx = (int) Math.round(idxD);
+//                            if (idx < 0) idx = 0;
+//                            if (idx >= size) idx = size - 1;
+//                            float yVal = sampleBuffer.get(idx); // in volts
+//                            float xForDisplay = (idx - triggerIndex) * samplePeriodUs; // aligned to sample grid
+//                            cursorX = xForDisplay;
+//                            cursorY = yVal;
+//                            runOnUiThread(this::updateCursorText);
+//                        }
+//                    }
+//                    // no explicit recycle call for MPPointD (safe)
+//                } catch (Exception ex) {
+//                    // ignore mapping errors
+//                }
+//            }
+//            return false; // allow chart to also handle the touch (zooming/panning)
+//        });
+
+    }
+
+    private void updateCursorText() {
+        runOnUiThread(() -> {
+            if (!Float.isNaN(cursorX) && !Float.isNaN(cursorY)) {
+                textViewCursor.setText(String.format("Cursor: X=%.1f µs, Y=%.2f V", cursorX, cursorY));
+            } else {
+                textViewCursor.setText("Cursor: —");
+            }
+        });
     }
 
     private void resetGraph() {

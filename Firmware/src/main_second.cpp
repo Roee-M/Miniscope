@@ -1,14 +1,15 @@
 
 
-/* 04/09/2025 - ADC Sampling with Serial print, and app communication
+/* 17/09/2025 - ADC Sampling with Serial print, and app communication
     - fastest sampling logic - bare minimum
     - 1.212MSPS - TODO: Verify sampling speed after added commands
     - double buffer for printing , both buffers in PSRAM
     - manual trigger reset button
     - formated printing in chunks, no grubled data
     - using semphores only when capture ready copying and printing
-    - TEST: testing now for larger buffer size (10k)
+    - TEST: testing now for larger buffer size (10k) - seeing artifacts caused by manual CS toggeling
     - added trigger type (rising/falling) and threshold setting over serial
+    - TODO: check prevData affects of actual trigger rising and falling on sampling rate
  *
 */
 
@@ -73,6 +74,7 @@ enum TriggerType
     TRIGGER_RISING = 0,
     TRIGGER_FALLING = 1,
 };
+volatile uint16_t prevData = 0; // for edge detection - TODO: test affects on triggering and sampling frqeuncy
 
 volatile TriggerType triggerType = TRIGGER_RISING; // default = rising
 
@@ -112,6 +114,33 @@ void IRAM_ATTR adcTask(void *pvParameters)
                 Serial.printf("Trigger at idx=%u raw=%u\n", (unsigned)triggerIndex, data);
             }
         }
+        // if (!triggered && pre_trigger_samples >= HALF_WINDOW)
+        // {
+        //     if (triggerType == TRIGGER_RISING &&
+        //         prevData <= sample_v_threshold &&
+        //         data > sample_v_threshold)
+        //     {
+        //         triggered = true;
+        //     }
+        //     else if (triggerType == TRIGGER_FALLING &&
+        //              prevData >= sample_v_threshold &&
+        //              data < sample_v_threshold)
+        //     {
+        //         triggered = true;
+        //     }
+
+        //     if (triggered)
+        //     {
+        //         triggerIndex = writeIndex;
+        //         pre_trigger_samples = 0;
+        //         samplesAfterTrigger = 0;
+        //         if (DEBUG)
+        //         {
+        //             Serial.printf("Trigger at idx=%u raw=%u\n",
+        //                           (unsigned)triggerIndex, data);
+        //         }
+        //     }
+        // }
 
         if (triggered && !captureReady)
         {
@@ -138,6 +167,7 @@ void IRAM_ATTR adcTask(void *pvParameters)
         }
 
         writeIndex = (writeIndex + 1) % BUFFER_SIZE;
+        // prevData = data;
 
         // Manual trigger reset button - after pressing waiting for (Voltage > V_T) sample > SAMPLE_T
         if (digitalRead(RESET_TRIGGER_PIN) == LOW && !button_pressed || serialTriggerRequested)
@@ -222,8 +252,8 @@ void setup()
 
     esp_task_wdt_deinit(); // Disable Task Watchdog for all tasks
 
-    disableCore0WDT();                                                              // disabling the watch dog for core 0, since we are using it for the ADC task
-    xTaskCreatePinnedToCore(adcTask, "ADC Task", 4096, NULL, 3, &adcTaskHandle, 1); // Core 1
+    disableCore0WDT();                                                                             // disabling the watch dog for core 0, since we are using it for the ADC task
+    xTaskCreatePinnedToCore(adcTask, "ADC Task", 4096, NULL, 3, &adcTaskHandle, 1);                // Core 1
     xTaskCreatePinnedToCore(printingTask, "Printing Task", 4096, NULL, 1, &printingTaskHandle, 0); // Core 0
 }
 

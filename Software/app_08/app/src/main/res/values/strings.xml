@@ -8,8 +8,8 @@
     </string-array>
 
     <string-array name="baud_rates">
-        <item>115200</item>
         <item>921600</item>
+        <item>115200</item>
     </string-array>
 
 
@@ -18,4 +18,5 @@
     <string name="finish">Finish:</string>
     <string name="open_drawer" >Open drawer</string>
     <string name="close_drawer" >Close Sidebar</string>
+    <string name="buffer_size">Buffer Size</string>
 </resources>
