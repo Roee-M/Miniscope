@@ -9,7 +9,7 @@ def parse_adc_window(file_path):
         log_text = f.read()
 
     # Extract everything between '=== Triggered Window ===' and '=== End Window ==='
-    match = re.search(r"=== Triggered Window \(raw values\) ===\s*(.*?)=== End Window ===", log_text, re.S)
+    match = re.search(r"START*(.*?)END", log_text, re.S)
     if not match:
         raise ValueError("Could not find triggered window in log.")
     
