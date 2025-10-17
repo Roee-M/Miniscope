@@ -16,4 +16,6 @@
     <color name="colorError">#EF5350</color>   <!-- softer red -->
 
     <color name="Toolbar">#000000</color>
+    <color name="light_green">#8F25CA2E</color>
+
 </resources>

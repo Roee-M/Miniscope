@@ -32,14 +32,15 @@
             android:layout_height="wrap_content"
             android:max="4095" />
 
-        <!-- Show stats toggle -->
-        <com.google.android.material.switchmaterial.SwitchMaterial
-            android:id="@+id/switchShowStats"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Show stats on graph"
-            android:checked="true"
-            android:paddingTop="16dp" />
+<!--        &lt;!&ndash; Show stats toggle &ndash;&gt;-->
+<!--        <com.google.android.material.switchmaterial.SwitchMaterial-->
+<!--            android:id="@+id/switchShowStats"-->
+<!--            android:layout_width="match_parent"-->
+<!--            android:layout_height="wrap_content"-->
+<!--            android:text="Show stats on graph"-->
+<!--            android:checked="true"-->
+
+<!--            android:paddingTop="16dp" />-->
 
         <!-- Trigger type -->
         <TextView

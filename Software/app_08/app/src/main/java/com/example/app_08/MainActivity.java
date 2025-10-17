@@ -63,7 +63,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String ACTION_USB_PERMISSION = "com.example.app_08.USB_PERMISSION";
     private static int BAUD_RATE = 921600; // default is now 921600 was 115200
     private static final int WINDOW_SIZE = 500;
-    private static final float SAMPLING_FREQ = 1_231_000f;// was 1_250_000f; updated according to actual sampling freq
+    private static final float SAMPLING_FREQ = 1_159_000f;// was 1_250_000f; updated according to actual sampling freq
     private static final float SAMPLING_PERIOD = 1f/SAMPLING_FREQ;
     private static final int MAX_SAMPLE_VALUE_12_BIT_ADC = 4096;
     private static final float V_REF = 3.3f;
@@ -582,7 +582,7 @@ public class MainActivity extends AppCompatActivity {
         String fStr = Double.isNaN(fSig) ? "—" : String.format("%.1f Hz", fSig);
 
         textViewStats.setText(String.format(
-                "Samples=%d  Max=%.2f  Min=%.2f  Pk-Pk=%.2f  Fs=%.2f MHz  Fsig=%s",
+                "Samples=%d  \n Max=%.2f \n Min=%.2f \n Pk-Pk=%.2f \n Fs=%.2f MHz \n Fsig=%s",
                 chartEntries.size(), maxVal, minVal, maxVal - minVal,
                 SAMPLING_FREQ / 1_000_000f, fStr));
     }

@@ -54,11 +54,17 @@ def analyze_signal(samples, fs, window_index, save=False, save_dir="adc_output",
     periods = np.diff(times[::2])
     jitter_ns = np.std(periods - np.mean(periods)) * 1e9
 
+    signal_rms = np.sqrt(np.mean(samples_v**2))
+    noise = samples_v - np.mean(samples_v)
+    noise_rms = np.sqrt(np.mean(noise**2))
+    SNR_dB = 20 * np.log10(signal_rms / noise_rms)
+
     print(f"\n--- Window {window_index+1} ---")
     print(f"Samples: {N}, Fs: {fs/1e6:.3f} MHz")
     print(f"Fundamental frequency: {f1:.1f} Hz")
     print(f"THD: {THD*100:.2f} %")
     print(f"THD+N: {THD_plus_N*100:.2f} %")
+    print(f"SNR: {SNR_dB:.2f} dB")  
     print(f"SINAD: {SINAD:.2f} dB")
     print(f"ENOB: {ENOB:.2f} bits")
     print(f"Jitter RMS: {jitter_ns:.2f} ns")

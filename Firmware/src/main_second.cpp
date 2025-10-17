@@ -1,16 +1,16 @@
 
 
-/* 17/09/2025 - ADC Sampling with Serial print, and app communication
-    - fastest sampling logic - bare minimum
-    - 1.212MSPS - TODO: Verify sampling speed after added commands
-    - double buffer for printing , both buffers in PSRAM
-    - manual trigger reset button
-    - formated printing in chunks, no grubled data
-    - using semphores only when capture ready copying and printing
-    - tested larger buffer size (10k) - seeing artifacts caused by manual CS toggeling also on app
-    - added trigger type (rising/falling) and threshold setting over seria
-    - using prev data for edge detection - improve triggering accuracy but causing smaple rate 1.1594Mhz
- *
+/* 16/10/2025 - Miniscope Presentation version
+    Feature list:
+    - Fastest sampling logic -cs line register level toggeling
+    - 1.1594 MSPS
+    - Double buffer for printing , both buffers in PSRAM, protected by semphore
+    - Manual trigger reset button
+    - Formated printing in chunks for reliable serial transmission
+    - Using semphores only when capture ready copying and printing - not affecting window sample rate
+    - Tested larger buffer size (10k) - seeing artifacts caused by manual CS toggeling also on app
+    - Supporting commands over serial - Trigger type (rising/falling) and threshold setting over serial
+
 */
 
 #include <Arduino.h>
@@ -102,45 +102,47 @@ void IRAM_ATTR adcTask(void *pvParameters)
             pre_trigger_samples++;
         }
 
-        if (!triggered && pre_trigger_samples >= HALF_WINDOW &&
-            ((triggerType == TRIGGER_RISING && data > sample_v_threshold) || (triggerType == TRIGGER_FALLING && data < sample_v_threshold)))
-        {
-            triggered = true;
-            triggerIndex = writeIndex;
-            pre_trigger_samples = 0; // reset pre-trigger samples
-            samplesAfterTrigger = 0;
-            if (DEBUG)
-            {
-                Serial.printf("Trigger at idx=%u raw=%u\n", (unsigned)triggerIndex, data);
-            }
-        }
-        // if (!triggered && pre_trigger_samples >= HALF_WINDOW)
+        // if (!triggered && pre_trigger_samples >= HALF_WINDOW &&
+        //     ((triggerType == TRIGGER_RISING && data > sample_v_threshold) || (triggerType == TRIGGER_FALLING && data < sample_v_threshold)))
         // {
-        //     if (triggerType == TRIGGER_RISING &&
-        //         prevData <= sample_v_threshold &&
-        //         data > sample_v_threshold)
+        //     triggered = true;
+        //     triggerIndex = writeIndex;
+        //     pre_trigger_samples = 0; // reset pre-trigger samples
+        //     samplesAfterTrigger = 0;
+        //     if (DEBUG)
         //     {
-        //         triggered = true;
-        //     }
-        //     else if (triggerType == TRIGGER_FALLING &&
-        //              prevData >= sample_v_threshold &&
-        //              data < sample_v_threshold)
-        //     {
-        //         triggered = true;
-        //     }
-
-        //     if (triggered)
-        //     {
-        //         triggerIndex = writeIndex;
-        //         pre_trigger_samples = 0;
-        //         samplesAfterTrigger = 0;
-        //         if (DEBUG)
-        //         {
-        //             Serial.printf("Trigger at idx=%u raw=%u\n",
-        //                           (unsigned)triggerIndex, data);
-        //         }
+        //         Serial.printf("Trigger at idx=%u raw=%u\n", (unsigned)triggerIndex, data);
         //     }
         // }
+
+        //  --- edge detection version using prevData for rising/falling ---
+        if (!triggered && pre_trigger_samples >= HALF_WINDOW)
+        {
+            if (triggerType == TRIGGER_RISING &&
+                prevData <= sample_v_threshold &&
+                data > sample_v_threshold)
+            {
+                triggered = true;
+            }
+            else if (triggerType == TRIGGER_FALLING &&
+                     prevData >= sample_v_threshold &&
+                     data < sample_v_threshold)
+            {
+                triggered = true;
+            }
+
+            if (triggered)
+            {
+                triggerIndex = writeIndex;
+                pre_trigger_samples = 0;
+                samplesAfterTrigger = 0;
+                if (DEBUG)
+                {
+                    Serial.printf("Trigger at idx=%u raw=%u\n",
+                                  (unsigned)triggerIndex, data);
+                }
+            }
+        }
 
         if (triggered && !captureReady)
         {
@@ -167,7 +169,7 @@ void IRAM_ATTR adcTask(void *pvParameters)
         }
 
         writeIndex = (writeIndex + 1) % BUFFER_SIZE;
-        // prevData = data; // comment out if not needed for rising/falling detection
+        prevData = data; // comment out if not needed for rising/falling detection
 
         // Manual trigger reset button - after pressing waiting for (Voltage > V_T) sample > SAMPLE_T
         if (digitalRead(RESET_TRIGGER_PIN) == LOW && !button_pressed || serialTriggerRequested)
