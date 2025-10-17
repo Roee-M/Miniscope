@@ -1,0 +1,21 @@
+<resources>
+    <!-- Primary branding color (green example) -->
+    <color name="colorPrimary">#49CD4F</color>
+    <color name="colorOnPrimary">#000000</color>
+
+    <!-- Backgrounds -->
+    <color name="colorBackground">#121212</color>
+    <color name="colorOnBackground">#FFFFFF</color>
+
+    <!-- Surface (cards, drawer, etc.) -->
+    <color name="colorSurface">#121212</color>
+    <color name="colorOnSurface">#FFFFFF</color>
+
+    <!-- Status colors -->
+    <color name="colorSuccess">#81C784</color> <!-- softer green for dark bg -->
+    <color name="colorError">#EF5350</color>   <!-- softer red -->
+
+    <color name="Toolbar">#000000</color>
+    <color name="light_green">#8F25CA2E</color>
+
+</resources>

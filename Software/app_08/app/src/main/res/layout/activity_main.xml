@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.drawerlayout.widget.DrawerLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/drawer_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/android:colorBackground"
+    tools:context=".MainActivity">
+
+<!--    android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"-->
+<!--    app:popupTheme="@style/ThemeOverlay.AppCompat.Dark"-->
+<!--    tools:context=".MainActivity">-->
+
+    <LinearLayout
+        android:id="@+id/rootLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="@color/Toolbar"
+            android:elevation="4dp"
+            android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"
+            app:popupTheme="@style/ThemeOverlay.AppCompat.Dark" />
+
+        <TextView
+            android:id="@+id/textViewConnection"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="Not Connected"
+            android:textColor="#FF0000"
+            android:textSize="16sp" />
+
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/lineChart"
+            android:layout_width="match_parent"
+            android:layout_height="261dp"
+            android:layout_marginTop="8dp" />
+
+        <TextView
+            android:id="@+id/textViewCursor"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="-35dp"
+            android:gravity="end"
+            android:text="Cursor: —"
+            android:textSize="12sp"
+            android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"
+            app:popupTheme="@style/ThemeOverlay.AppCompat.Dark" />
+<!--            android:textColor="@color/colorOnBackground"/>-->
+
+
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="20dp">
+
+
+            <Button
+                android:id="@+id/buttonTrigger"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Arm Capture" />
+
+
+            <Button
+                android:id="@+id/buttonReset"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Clear Graph" />
+            <Button
+                android:id="@+id/buttonHomeView"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Home View" />
+
+
+        </LinearLayout>
+
+        <SeekBar
+            android:id="@+id/seekBarThreshold"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:max="4095" />
+
+        <TextView
+            android:id="@+id/textViewThreshold"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="V Threshold: 0.0 V"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:id="@+id/textViewStats"
+            android:layout_width="match_parent"
+            android:layout_height="58dp"
+            android:layout_marginTop="8dp"
+            android:text="Stats: " />
+
+
+
+    </LinearLayout>
+    <com.google.android.material.navigation.NavigationView
+        android:id="@+id/navigationView"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:fitsSystemWindows="true"
+        app:headerLayout="@layout/drawer_controls" />
+</androidx.drawerlayout.widget.DrawerLayout>

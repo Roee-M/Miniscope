@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">app_08</string>
+    <string-array name="Contacts">
+        <item></item>
+        <item>Dan Levi</item>
+        <item>Yossi Cohen</item>
+        <item>Guy Shachar</item>
+    </string-array>
+
+    <string-array name="baud_rates">
+        <item>921600</item>
+        <item>115200</item>
+    </string-array>
+
+
+    <string name="select_name">Select name:</string>
+    <string name="selected_name">Selected name: %s</string>
+    <string name="finish">Finish:</string>
+    <string name="open_drawer" >Open drawer</string>
+    <string name="close_drawer" >Close Sidebar</string>
+    <string name="buffer_size">Buffer Size</string>
+</resources>
