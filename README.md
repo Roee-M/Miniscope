@@ -35,9 +35,6 @@ The Miniscope is composed of the following subsystems:
 ---
 
 ## ⚙️ Hardware Design
-
-![Figure 3 – Hardware Block Diagram](Docs/Figures/hardware_block_diagram.png)
-
 ### ✳️ Key Features
 
 - **AFE**: Low-noise unity-gain buffer (OPA365) with 33 Ω / 1 nF RC network.  
@@ -46,8 +43,8 @@ The Miniscope is composed of the following subsystems:
 - **Mechanical Design**: Compact 3D-printed pen-style enclosure with accessible probe and GND terminal.  
 - **PCB**: 2-layer design with impedance-matched USB-C lines, test points, and isolated AVDD/DVDD.
 
-![Figure 4 – 3D Model and PCB Layout](Docs/Figures/3D_Model_top_side_transparent.png)
-![Figure 5 – 3D Model Enclosure](Docs/Figures/3D_Model_upside.png)
+![Figure 3 – 3D Model and PCB Layout](Docs/Figures/3D_Model_top_side_transparent.png)
+![Figure 4 – 3D Model Enclosure](Docs/Figures/3D_Model_upside.png)
 
 Estimated cost: **~$29.5** per device.
 
@@ -79,7 +76,7 @@ TYPE=RISING / TYPE=FALLING
 
 ## 📱 Android Application
 
-![Figure 6 – Android App UI](Docs/Figures/app_screenshot.png)
+![Figure 5 – Android App UI](Docs/Figures/app_screenshot.png)
 
 The **Miniscope Android app** provides a real-time waveform visualization and control interface.
 
@@ -129,7 +126,7 @@ The **Miniscope Android app** provides a real-time waveform visualization and co
 
 ## 📊 Performance and Validation
 
-![Figure 9 – Sampling and Bandwidth Validation](Docs/Figures/100Khz_sin_16k_samp_fft_60_THD.png)
+![Figure 6 – Sampling and Bandwidth Validation](Docs/Figures/100Khz_sin_16k_samp_fft_60_THD.png)
 
 | Metric | Measured Value | Notes |
 |--------|----------------|-------|
