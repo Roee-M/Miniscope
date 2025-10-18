@@ -1,4 +1,4 @@
-# 🧠 Miniscope™ – Portable, Low-Cost Oscilloscope
+# 🧠 Miniscope – Portable, Low-Cost Oscilloscope
 
 _Affordable • Portable • Educational_
 
@@ -6,9 +6,9 @@ _Affordable • Portable • Educational_
 
 ## 📸 Project Overview
 
-![Figure 1 – Miniscope Device Overview](docs/figures/miniscope_device.png)
+![Figure 1 – Miniscope Device Overview](docs/figures/System_overview.png)
 
-The **Miniscope™** project is a **portable, low-cost handheld trigger-based oscilloscope** designed to capture and analyze high-speed analog signals.
+The **Miniscope** project is a **portable, low-cost handheld trigger-based oscilloscope** designed to capture and analyze high-speed analog signals.
 
 It is based on an **ESP32-S3-WROOM-1-N16R8** microcontroller interfaced with an **AD7276 12-bit ADC**, achieving sampling rates of approximately **1.16 MSPS**.  
 Captured data is streamed via **USB-C** to an **Android application**, which provides **trigger-based waveform visualization** and **basic statistical analysis**.
@@ -19,7 +19,7 @@ This project demonstrates that oscilloscope-level signal acquisition and visuali
 
 ## 🧩 System Architecture
 
-![Figure 2 – System Block Diagram](docs/figures/system_block_diagram.png)
+![Figure 2 – System Block Diagram](docs/figures/Miniscope_System_Block_Diagram.png)
 
 The Miniscope is composed of the following subsystems:
 
@@ -46,15 +46,14 @@ The Miniscope is composed of the following subsystems:
 - **Mechanical Design**: Compact 3D-printed pen-style enclosure with accessible probe and GND terminal.  
 - **PCB**: 2-layer design with impedance-matched USB-C lines, test points, and isolated AVDD/DVDD.
 
-![Figure 4 – 3D Model and PCB Layout](docs/figures/miniscope_pcb_model.png)
+![Figure 4 – 3D Model and PCB Layout](Docs/Figures/3D_Model_top_side_transparent.png)
+![Figure 5 – 3D Model Enclosure](Docs/Figures/3D_Model_upside.png)
 
 Estimated cost: **~$29.5** per device.
 
 ---
 
 ## 🔬 Firmware Implementation
-
-![Figure 5 – Firmware Architecture](docs/figures/firmware_architecture.png)
 
 The Miniscope firmware was developed in **PlatformIO (ESP-IDF + Arduino)** using **FreeRTOS**.  
 It operates two main tasks running on separate cores:
@@ -80,7 +79,7 @@ TYPE=RISING / TYPE=FALLING
 
 ## 📱 Android Application
 
-![Figure 6 – Android App UI](docs/figures/android_app_ui.png)
+![Figure 6 – Android App UI](Docs/Figures/app_screenshot.png)
 
 The **Miniscope Android app** provides a real-time waveform visualization and control interface.
 
@@ -93,7 +92,6 @@ The **Miniscope Android app** provides a real-time waveform visualization and co
   max, min, peak-to-peak, sampling rate, frequency estimate
 - Side drawer menu for advanced settings
 
-![Figure 7 – App in Landscape Mode](docs/figures/android_app_landscape.png)
 
 ### ⚙️ Communication
 
@@ -105,8 +103,6 @@ The **Miniscope Android app** provides a real-time waveform visualization and co
 ---
 
 ## 🔌 Getting Started
-
-![Figure 8 – Typical Setup](docs/figures/system_setup.png)
 
 ### Hardware Setup
 1. Connect **Miniscope GND** to target circuit GND.  
@@ -133,7 +129,7 @@ The **Miniscope Android app** provides a real-time waveform visualization and co
 
 ## 📊 Performance and Validation
 
-![Figure 9 – Sampling and Bandwidth Validation](docs/figures/performance_validation.png)
+![Figure 9 – Sampling and Bandwidth Validation](docs/figures/100Khz_sin_16k_samp_fft_60_THD.png)
 
 | Metric | Measured Value | Notes |
 |--------|----------------|-------|
@@ -207,7 +203,7 @@ See [`LICENSE`](LICENSE) for details.
 - `/Firmware/`: PlatformIO ESP32-S3 firmware 
 - `/Software/`: 
     - `/Android-App/`: Android Studio Java project for mobile visualization and control 
-    - `/PC-Python/`: Python scripts for PC interfacing, debugging, and analysis 
+    - `/PC_Python/`: Python scripts for PC interfacing, debugging, and analysis 
 ---
 
 > _“See signals. Shape tomorrow.”_ — **The Miniscope Team**
