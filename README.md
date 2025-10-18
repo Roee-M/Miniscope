@@ -6,7 +6,7 @@ _Affordable • Portable • Educational_
 
 ## 📸 Project Overview
 
-![Figure 1 – Miniscope Device Overview](docs/figures/System_overview.png)
+![Figure 1 – Miniscope Device Overview](Docs/Figures/System_overview.png)
 
 The **Miniscope** project is a **portable, low-cost handheld trigger-based oscilloscope** designed to capture and analyze high-speed analog signals.
 
@@ -19,7 +19,7 @@ This project demonstrates that oscilloscope-level signal acquisition and visuali
 
 ## 🧩 System Architecture
 
-![Figure 2 – System Block Diagram](docs/figures/Miniscope_System_Block_Diagram.png)
+![Figure 2 – System Block Diagram](Docs/Figures/Miniscope_System_Block_Diagram.png)
 
 The Miniscope is composed of the following subsystems:
 
@@ -36,7 +36,7 @@ The Miniscope is composed of the following subsystems:
 
 ## ⚙️ Hardware Design
 
-![Figure 3 – Hardware Block Diagram](docs/figures/hardware_block_diagram.png)
+![Figure 3 – Hardware Block Diagram](Docs/Figures/hardware_block_diagram.png)
 
 ### ✳️ Key Features
 
@@ -129,7 +129,7 @@ The **Miniscope Android app** provides a real-time waveform visualization and co
 
 ## 📊 Performance and Validation
 
-![Figure 9 – Sampling and Bandwidth Validation](docs/figures/100Khz_sin_16k_samp_fft_60_THD.png)
+![Figure 9 – Sampling and Bandwidth Validation](Docs/Figures/100Khz_sin_16k_samp_fft_60_THD.png)
 
 | Metric | Measured Value | Notes |
 |--------|----------------|-------|
