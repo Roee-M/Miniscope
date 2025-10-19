@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>MiniScope - Fast Capture with Zoom</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    canvas { 
+      width: 100%; 
+      max-width: 800px; 
+      height: 300px; 
+      display: block; 
+      margin: 20px auto; 
+    }
+    button { margin: 10px; padding: 10px 20px; font-size: 16px; }
+    #status { font-weight: bold; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>📡 MiniScope Fast Capture with Zoom</h1>
+  <button onclick="startCapture()">📷 Start Capture</button>
+  <button onclick="chart.resetZoom()">🔄 Reset Zoom</button>
+  <div id="status">Status: Ready</div>
+  <canvas id="chart"></canvas>
+
+  <script>
+    const socket = io('/scope');
+    const V_REF = 3.3;
+    const SAMPLE_PERIOD_US = 0.333; // 3 MSPS
+
+    const ctx = document.getElementById('chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Voltage (V)',
+          data: [],
+          borderColor: 'red',
+          borderWidth: 1,
+          pointRadius: 0,
+          tension: 0.1
+        }]
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        scales: {
+          x: {
+            title: { display: true, text: 'Time (µs)' },
+            ticks: { autoSkip: true, maxTicksLimit: 10 }
+          },
+          y: {
+            title: { display: true, text: 'Voltage (V)' },
+            min: 0,
+            max: V_REF
+          }
+        },
+        plugins: {
+          zoom: {
+            zoom: {
+              wheel: { enabled: true },
+              pinch: { enabled: true },
+              mode: 'x'
+            },
+            pan: {
+              enabled: true,
+              mode: 'x',
+              modifierKey: 'ctrl' // Hold CTRL while dragging to pan (optional)
+            }
+          }
+        }
+      }
+    });
+
+    function startCapture() {
+      document.getElementById('status').innerText = "Status: Triggering capture...";
+      chart.data.labels = [];
+      chart.data.datasets[0].data = [];
+      chart.update();
+      socket.emit('start_trigger');
+    }
+
+    socket.on('done', async () => {
+      document.getElementById('status').innerText = "Status: Downloading data...";
+
+      const res = await fetch('/capture.bin');
+      const buf = await res.arrayBuffer();
+      const view = new DataView(buf);
+
+      const data = [];
+      const labels = [];
+      const sampleCount = buf.byteLength / 2;
+
+      for (let i = 0; i < buf.byteLength; i += 2) {
+        const raw = view.getUint16(i, true);
+        data.push((raw / 4095.0) * V_REF);
+        labels.push((i / 2) * SAMPLE_PERIOD_US);
+      }
+
+      console.log("First 10 data points:", data.slice(0,10));
+      console.log("First 10 labels:", labels.slice(0,10));
+
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = data;
+      chart.update();
+
+      document.getElementById('status').innerText = `Status: Done. Received ${sampleCount} samples.`;
+    });
+
+    socket.on('connect', () => {
+      console.log("Connected to server via WebSocket!");
+    });
+  </script>
+</body>
+</html>
